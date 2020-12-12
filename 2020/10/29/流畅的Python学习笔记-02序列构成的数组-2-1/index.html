@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 5.2.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/all.min.css">
+
+<script id="hexo-configurations">
+    var NexT = window.NexT || {};
+    var CONFIG = {"hostname":"example.com","root":"/","scheme":"Muse","version":"7.8.0","exturl":false,"sidebar":{"position":"left","display":"always","padding":18,"offset":12,"onmobile":false},"copycode":{"enable":false,"show_result":false,"style":null},"back2top":{"enable":true,"sidebar":false,"scrollpercent":false},"bookmark":{"enable":false,"color":"#222","save":"auto"},"fancybox":false,"mediumzoom":false,"lazyload":false,"pangu":false,"comments":{"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},"algolia":{"hits":{"per_page":10},"labels":{"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}},"localsearch":{"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},"motion":{"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}},"path":"search.xml"};
+  </script>
+
+  <meta name="description" content="第二章第一节：内置序列类型概览">
+<meta property="og:type" content="article">
+<meta property="og:title" content="流畅的Python学习笔记-02序列构成的数组-2-1">
+<meta property="og:url" content="http://example.com/2020/10/29/%E6%B5%81%E7%95%85%E7%9A%84Python%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0-02%E5%BA%8F%E5%88%97%E6%9E%84%E6%88%90%E7%9A%84%E6%95%B0%E7%BB%84-2-1/index.html">
+<meta property="og:site_name" content="科学尽头是神学">
+<meta property="og:description" content="第二章第一节：内置序列类型概览">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:image" content="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201028144038.png">
+<meta property="og:image" content="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201029133908.png">
+<meta property="article:published_time" content="2020-10-29T02:33:27.000Z">
+<meta property="article:modified_time" content="2020-10-29T05:47:06.602Z">
+<meta property="article:author" content="wu">
+<meta property="article:tag" content="学习笔记">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201028144038.png">
+
+<link rel="canonical" href="http://example.com/2020/10/29/%E6%B5%81%E7%95%85%E7%9A%84Python%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0-02%E5%BA%8F%E5%88%97%E6%9E%84%E6%88%90%E7%9A%84%E6%95%B0%E7%BB%84-2-1/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome : false,
+    isPost : true,
+    lang   : 'zh-CN'
+  };
+</script>
+
+  <title>流畅的Python学习笔记-02序列构成的数组-2-1 | 科学尽头是神学</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+
+  <div class="site-meta">
+
+    <a href="/" class="brand" rel="start">
+      <span class="logo-line-before"><i></i></span>
+      <h1 class="site-title">科学尽头是神学</h1>
+      <span class="logo-line-after"><i></i></span>
+    </a>
+      <p class="site-subtitle" itemprop="description">于桃子，我爱你</p>
+  </div>
+
+  <div class="site-nav-right">
+    <div class="toggle popup-trigger">
+        <i class="fa fa-search fa-fw fa-lg"></i>
+    </div>
+  </div>
+</div>
+
+
+
+
+<nav class="site-nav">
+  <ul id="menu" class="main-menu menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-home fa-fw"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-tags fa-fw"></i>标签</a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-th fa-fw"></i>分类</a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-archive fa-fw"></i>归档</a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+</nav>
+
+
+
+  <div class="search-pop-overlay">
+    <div class="popup search-popup">
+        <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocapitalize="off"
+           placeholder="搜索..." spellcheck="false"
+           type="search" class="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result">
+  <div id="no-result">
+    <i class="fa fa-spinner fa-pulse fa-5x fa-fw"></i>
+  </div>
+</div>
+
+    </div>
+  </div>
+
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content post posts-expand">
+            
+
+    
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block" lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://example.com/2020/10/29/%E6%B5%81%E7%95%85%E7%9A%84Python%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0-02%E5%BA%8F%E5%88%97%E6%9E%84%E6%88%90%E7%9A%84%E6%95%B0%E7%BB%84-2-1/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/wu_avatar.png">
+      <meta itemprop="name" content="wu">
+      <meta itemprop="description" content="宇宙的尽头到底是什么">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="科学尽头是神学">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          流畅的Python学习笔记-02序列构成的数组-2-1
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="far fa-calendar"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+              
+
+              <time title="创建时间：2020-10-29 10:33:27 / 修改时间：13:47:06" itemprop="dateCreated datePublished" datetime="2020-10-29T10:33:27+08:00">2020-10-29</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="far fa-folder"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E6%B5%81%E7%95%85%E7%9A%84Python/" itemprop="url" rel="index"><span itemprop="name">流畅的Python</span></a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E6%B5%81%E7%95%85%E7%9A%84Python/%E7%AC%AC%E4%BA%8C%E7%AB%A0-%E5%BA%8F%E5%88%97%E6%9E%84%E6%88%90%E7%9A%84%E6%95%B0%E7%BB%84/" itemprop="url" rel="index"><span itemprop="name">第二章 序列构成的数组</span></a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>第二章第一节：内置序列类型概览</p>
+<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201028144038.png"></p>
+<a id="more"></a>
+
+<h3 id="引读"><a href="#引读" class="headerlink" title="引读"></a>引读</h3><p>在创造 Python 以前，Guido 曾为 ABC 语言贡献过代码。ABC 语言是一个致力于为初学者设计编程环境的长达 10 年的研究项目，其中很多点子在现在看来都很有 Python 风格：序列的泛型操作、内置的元组和映射类型、用缩进来架构的源码、无需变量声明的强类型，等等。Python 对开发者如此友好，根源就在这里。</p>
+<p>Python 也从 ABC 那里继承了用统一的风格去处理序列数据这一特点。不管是哪种数据结构，字符串、列表、字节序列、数组、XML元素，抑或是数据库查询结果，它们都共用一套丰富的操作：迭代、切片、排序，还有拼接。</p>
+<p>深入理解 Python 中的不同序列类型，不但能让我们避免重新发明轮子，它们的 API 还能帮助我们把自己定义的 API 设计得跟原生的序列一样，或者是跟未来可能出现的序列类型保持兼容。</p>
+<p>本章讨论的内容几乎可以应用到所有的序列类型上，从我们熟悉的list，到 Python 3 中特有的 str 和 bytes。我还会特别提到跟列表、元组、数组以及队列有关的话题。但是 Unicode 字符串和字节序列这方面的内容被放在了第 4 章。另外这里讨论的数据结构都是 Python中现成可用的，如果你想知道怎样创建自己的序列类型，那得等到第 10 章。</p>
+<h3 id="内置序列类型概览"><a href="#内置序列类型概览" class="headerlink" title="内置序列类型概览"></a>内置序列类型概览</h3><p>Python 标准库用 C 实现了丰富的序列类型，列举如下。</p>
+<ul>
+<li><p>容器序列：</p>
+<p><code>list</code>、<code>tuple</code> 和 <code>collections.deque</code> 这些序列能存放不同类型的数据。</p>
+</li>
+<li><p>扁平序列：</p>
+<p><code>str</code>、<code>bytes</code>、<code>bytearray</code>、<code>memoryview</code> 和 <code>array.array</code>，这类序列只能容纳一种类型。</p>
+</li>
+</ul>
+<p>容器序列存放的是它们所包含的任意类型的对象的引用，而扁平序列里存放的是值而不是引用。换句话说，<font color=red>扁平序列其实是一段连续的内存空间</font>。由此可见扁平序列其实更加紧凑，但是它里面只能存放诸如字符、字节和数值这种基础类型。</p>
+<p>序列类型还能按照能否修改来分类。</p>
+<ul>
+<li><p>可变序列</p>
+<p><code>list</code>、<code>bytearray</code>、<code>array.array</code>、<code>collections.deque</code> 和 <code>memoryview</code>。</p>
+</li>
+<li><p>不可变序列</p>
+<p><code>tuple</code>、<code>str</code> 和 <code>bytes</code>。</p>
+</li>
+</ul>
+<p>下图显示了可变序列（<code>MutableSequence</code>）和不可变序列（<code>Sequence</code>）的差异，同时也能看出前者从后者那里继承了一些方法。虽然内置的序列类型并不是直接从 <code>Sequence</code> 和 <code>MutableSequence</code> 这两个抽象基类（<code>Abstract Base Class</code>，ABC）继承而来的，但是了解这些基类可以帮助我们总结出那些完整的序列类型包含了哪些功能。</p>
+<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201029133908.png"></p>
+<p>上面那个 UML 类图列举了 <code>collections.abc</code> 中的几个类（超类在最上边，箭头从子类指向超类，斜体名称代表抽象类和抽象方法）通过记住这些类的共有特性，把可变与不可变序列或是容器与扁平序列的概念融会贯通，在探索并学习新的序列类型时，你会更加得心手。最重要也最基础的序列类型应该就是列表（list）了。list 是一个可变序列，并且能同时存放不同类型的元素。作为这本书的读者，我想你应该对它很了解了，因此让我们直接开始讨论列表推导（<code>listcomprehension</code>）吧。列表推导是一种构建列表的方法，它异常强大，然而由于相关的句法比较晦涩，人们往往不愿意去用它。掌握列表推导还可以为我们打开生成器表达式（<code>generator expression</code>）的大门，后者具有生成各种类型的元素并用它们来填充序列的功能。下一节就来看看这两个概念。</p>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/" rel="tag"># 学习笔记</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/10/28/%E6%B5%81%E7%95%85%E7%9A%84Python%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0-01%E6%95%B0%E6%8D%AE%E6%A8%A1%E5%9E%8B-1-5/" rel="prev" title="流畅的Python学习笔记-01数据模型-1-5">
+      <i class="fa fa-chevron-left"></i> 流畅的Python学习笔记-01数据模型-1-5
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/10/29/%E6%B5%81%E7%95%85%E7%9A%84Python%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0-02%E5%BA%8F%E5%88%97%E6%9E%84%E6%88%90%E7%9A%84%E6%95%B0%E7%BB%84-2-2/" rel="next" title="流畅的Python学习笔记-02序列构成的数组-2-2">
+      流畅的Python学习笔记-02序列构成的数组-2-2 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let { activeClass } = CONFIG.comments;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-3"><a class="nav-link" href="#%E5%BC%95%E8%AF%BB"><span class="nav-number">1.</span> <span class="nav-text">引读</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#%E5%86%85%E7%BD%AE%E5%BA%8F%E5%88%97%E7%B1%BB%E5%9E%8B%E6%A6%82%E8%A7%88"><span class="nav-number">2.</span> <span class="nav-text">内置序列类型概览</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+    <img class="site-author-image" itemprop="image" alt="wu"
+      src="/images/wu_avatar.png">
+  <p class="site-author-name" itemprop="name">wu</p>
+  <div class="site-description" itemprop="description">宇宙的尽头到底是什么</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">16</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">11</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">10</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+	
+	
+	  <!-- require APlayer -->
+	  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/aplayer/dist/APlayer.min.css">
+	  <script src="https://cdn.jsdelivr.net/npm/aplayer/dist/APlayer.min.js"></script>
+      <!-- require MetingJS -->
+	  <script src="https://cdn.jsdelivr.net/npm/meting@2/dist/Meting.min.js"></script>
+      <meting-js
+		server="netease"
+		type="playlist"
+		id="3224891457"
+		list-folded="true">
+	  </meting-js>
+
+	  
+	  
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-heart"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">wu</span>
+</div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+
+<script src="/js/utils.js"></script>
+
+<script src="/js/motion.js"></script>
+
+
+<script src="/js/schemes/muse.js"></script>
+
+
+<script src="/js/next-boot.js"></script>
+
+
+
+
+  
+
+
+
+
+  
+<script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

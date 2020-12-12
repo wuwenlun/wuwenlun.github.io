@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 5.2.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/all.min.css">
+
+<script id="hexo-configurations">
+    var NexT = window.NexT || {};
+    var CONFIG = {"hostname":"example.com","root":"/","scheme":"Muse","version":"7.8.0","exturl":false,"sidebar":{"position":"left","display":"always","padding":18,"offset":12,"onmobile":false},"copycode":{"enable":false,"show_result":false,"style":null},"back2top":{"enable":true,"sidebar":false,"scrollpercent":false},"bookmark":{"enable":false,"color":"#222","save":"auto"},"fancybox":false,"mediumzoom":false,"lazyload":false,"pangu":false,"comments":{"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},"algolia":{"hits":{"per_page":10},"labels":{"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}},"localsearch":{"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},"motion":{"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}},"path":"search.xml"};
+  </script>
+
+  <meta name="description" content="找到分组条件下最近的一条数据">
+<meta property="og:type" content="article">
+<meta property="og:title" content="MySQL分组下最近的记录">
+<meta property="og:url" content="http://example.com/2020/11/27/MySQL%E5%88%86%E7%BB%84%E4%B8%8B%E5%BE%97%E5%88%B0%E6%9C%80%E8%BF%91%E7%9A%84%E8%AE%B0%E5%BD%95/index.html">
+<meta property="og:site_name" content="科学尽头是神学">
+<meta property="og:description" content="找到分组条件下最近的一条数据">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:image" content="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201127163535.png">
+<meta property="og:image" content="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201127172045.png">
+<meta property="og:image" content="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201127174105.png">
+<meta property="og:image" content="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201208200558.png">
+<meta property="og:image" content="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201209195825.png">
+<meta property="og:image" content="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201209201457.png">
+<meta property="og:image" content="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201209202925.png">
+<meta property="og:image" content="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201212140226.png">
+<meta property="og:image" content="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201127174105.png">
+<meta property="article:published_time" content="2020-11-27T08:27:26.000Z">
+<meta property="article:modified_time" content="2020-12-12T06:19:20.345Z">
+<meta property="article:author" content="wu">
+<meta property="article:tag" content="MySQL">
+<meta property="article:tag" content="SQL">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201127163535.png">
+
+<link rel="canonical" href="http://example.com/2020/11/27/MySQL%E5%88%86%E7%BB%84%E4%B8%8B%E5%BE%97%E5%88%B0%E6%9C%80%E8%BF%91%E7%9A%84%E8%AE%B0%E5%BD%95/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome : false,
+    isPost : true,
+    lang   : 'zh-CN'
+  };
+</script>
+
+  <title>MySQL分组下最近的记录 | 科学尽头是神学</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+
+  <div class="site-meta">
+
+    <a href="/" class="brand" rel="start">
+      <span class="logo-line-before"><i></i></span>
+      <h1 class="site-title">科学尽头是神学</h1>
+      <span class="logo-line-after"><i></i></span>
+    </a>
+      <p class="site-subtitle" itemprop="description">于桃子，我爱你</p>
+  </div>
+
+  <div class="site-nav-right">
+    <div class="toggle popup-trigger">
+        <i class="fa fa-search fa-fw fa-lg"></i>
+    </div>
+  </div>
+</div>
+
+
+
+
+<nav class="site-nav">
+  <ul id="menu" class="main-menu menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-home fa-fw"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-tags fa-fw"></i>标签</a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-th fa-fw"></i>分类</a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-archive fa-fw"></i>归档</a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+</nav>
+
+
+
+  <div class="search-pop-overlay">
+    <div class="popup search-popup">
+        <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocapitalize="off"
+           placeholder="搜索..." spellcheck="false"
+           type="search" class="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result">
+  <div id="no-result">
+    <i class="fa fa-spinner fa-pulse fa-5x fa-fw"></i>
+  </div>
+</div>
+
+    </div>
+  </div>
+
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content post posts-expand">
+            
+
+    
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block" lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://example.com/2020/11/27/MySQL%E5%88%86%E7%BB%84%E4%B8%8B%E5%BE%97%E5%88%B0%E6%9C%80%E8%BF%91%E7%9A%84%E8%AE%B0%E5%BD%95/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/wu_avatar.png">
+      <meta itemprop="name" content="wu">
+      <meta itemprop="description" content="宇宙的尽头到底是什么">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="科学尽头是神学">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          MySQL分组下最近的记录
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="far fa-calendar"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-11-27 16:27:26" itemprop="dateCreated datePublished" datetime="2020-11-27T16:27:26+08:00">2020-11-27</time>
+            </span>
+              <span class="post-meta-item">
+                <span class="post-meta-item-icon">
+                  <i class="far fa-calendar-check"></i>
+                </span>
+                <span class="post-meta-item-text">更新于</span>
+                <time title="修改时间：2020-12-12 14:19:20" itemprop="dateModified" datetime="2020-12-12T14:19:20+08:00">2020-12-12</time>
+              </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="far fa-folder"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/MySQL/" itemprop="url" rel="index"><span itemprop="name">MySQL</span></a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/MySQL/SQL/" itemprop="url" rel="index"><span itemprop="name">SQL</span></a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>找到分组条件下最近的一条数据</p>
+<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201127163535.png"></p>
+<a id="more"></a>
+
+<p>对于不是很熟悉SQL的同学说，立马可能会想到排序后再<code>limit 1</code>就搞定了，看到数据后就开始反思了：“这才一条数据，这不是我想要的效果“。有的同学思前想后会写出来，我相信其他大部分同学肯定写不出来，对于这部分同学你们有福了。看了这个段落，就能解决你们的痛点。</p>
+<h5 id="建立一张表"><a href="#建立一张表" class="headerlink" title="建立一张表"></a>建立一张表</h5><p>该表主要记录用户购买手机日期。我相信一个人在他的一生中肯定有购买手机的经历，有的人一生可能只有一部手机（当然这不太可能），有的人有多部手机。根据该表找到所有用户购买手机最近的记录。</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">create</span> <span class="keyword">table</span> user_phone (</span><br><span class="line">	<span class="keyword">id</span> <span class="built_in">int</span> <span class="keyword">not</span> <span class="literal">null</span> auto_increment <span class="keyword">comment</span> <span class="string">&#x27;主键&#x27;</span>,</span><br><span class="line">    <span class="keyword">name</span> <span class="built_in">varchar</span>(<span class="number">16</span>) <span class="keyword">comment</span> <span class="string">&#x27;姓名&#x27;</span>,</span><br><span class="line">    phone <span class="built_in">varchar</span>(<span class="number">16</span>) <span class="keyword">comment</span> <span class="string">&#x27;手机型号&#x27;</span>,</span><br><span class="line">    buy_time datetime <span class="keyword">comment</span> <span class="string">&#x27;购买日期&#x27;</span>,</span><br><span class="line">    primary <span class="keyword">key</span>(<span class="keyword">id</span>)</span><br><span class="line">);</span><br><span class="line"></span><br><span class="line"><span class="keyword">insert</span> <span class="keyword">into</span> user_phone (<span class="keyword">name</span>, phone, buy_time) <span class="keyword">values</span> (<span class="string">&quot;吴文伦&quot;</span>, <span class="string">&quot;天语&quot;</span>, <span class="string">&quot;2006-07-12&quot;</span>), (<span class="string">&quot;吴文伦&quot;</span>, <span class="string">&quot;诺基亚&quot;</span>, <span class="string">&quot;2011-08-23&quot;</span>), (<span class="string">&quot;吴文伦&quot;</span>, <span class="string">&quot;中兴&quot;</span>, <span class="string">&quot;2015-04-08&quot;</span>), (<span class="string">&quot;吴文伦&quot;</span>, <span class="string">&quot;魅族&quot;</span>, <span class="string">&quot;2017-12-02&quot;</span>), (<span class="string">&quot;吴文伦&quot;</span>, <span class="string">&quot;红米&quot;</span>, <span class="string">&quot;2020-05-15&quot;</span>);</span><br><span class="line"><span class="keyword">insert</span> <span class="keyword">into</span> user_phone (<span class="keyword">name</span>, phone, buy_time) <span class="keyword">values</span> (<span class="string">&quot;勒布朗&quot;</span>, <span class="string">&quot;大哥大&quot;</span>, <span class="string">&quot;1995-09-16&quot;</span>), (<span class="string">&quot;勒布朗&quot;</span>, <span class="string">&quot;诺基亚&quot;</span>, <span class="string">&quot;2001-03-22&quot;</span>), (<span class="string">&quot;勒布朗&quot;</span>, <span class="string">&quot;苹果1代&quot;</span>, <span class="string">&quot;2007-06-08&quot;</span>), (<span class="string">&quot;勒布朗&quot;</span>, <span class="string">&quot;苹果5代&quot;</span>, <span class="string">&quot;2013-11-09&quot;</span>);</span><br><span class="line"><span class="keyword">insert</span> <span class="keyword">into</span> user_phone (<span class="keyword">name</span>, phone, buy_time) <span class="keyword">values</span> (<span class="string">&quot;老于&quot;</span>, <span class="string">&quot;土砖&quot;</span>, <span class="string">&quot;1994-01-01&quot;</span>), (<span class="string">&quot;老于&quot;</span>, <span class="string">&quot;华为&quot;</span>, <span class="string">&quot;2003-08-09&quot;</span>), (<span class="string">&quot;老于&quot;</span>, <span class="string">&quot;vivo&quot;</span>, <span class="string">&quot;2009-07-08&quot;</span>);</span><br></pre></td></tr></table></figure>
+
+<p>数据列表如下：</p>
+<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201127172045.png"></p>
+<p>如何操作才能找到符合业务要求的数据呢？正确数据如下：</p>
+<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201127174105.png"></p>
+<p>——————————————————————————–华丽的分界线—————————————————————————————-</p>
+<h5 id="分组原理"><a href="#分组原理" class="headerlink" title="分组原理"></a>分组原理</h5><p>表里面有三个人，故应想到对<code>name</code>进行分组，分组后能够得到<font color=red><strong>子数据列表项</strong></font>，然后根据聚合函数<code>max</code>在<font color=red><strong>子数据列表项</strong></font>中找到<code>buy_time</code>这一列中最大的日期的那一个值。聚合函数的作用就是在一堆列表数据里的指定列进行聚合运算合成一个值，注意它只针对字段列。<img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201208200558.png"></p>
+<p>执行该SQL语句会得到如下数据</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">select</span> <span class="keyword">name</span>, <span class="keyword">max</span>(buy_time) <span class="keyword">as</span> buy_time <span class="keyword">from</span> user_phone <span class="keyword">group</span> <span class="keyword">by</span> <span class="keyword">name</span>;</span><br></pre></td></tr></table></figure>
+
+<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201209195825.png"></p>
+<p>但是少了id和phone两个字段，很多人可能会想到这样子做：</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">select</span> <span class="keyword">id</span>, <span class="keyword">name</span>, phone, <span class="keyword">max</span>(buy_time) <span class="keyword">as</span> buy_time <span class="keyword">from</span> user_phone <span class="keyword">group</span> <span class="keyword">by</span> <span class="keyword">name</span>;</span><br></pre></td></tr></table></figure>
+
+<p>那我们执行以下，结果报错了！！</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">ERROR 1055 (42000): Expression #1 of SELECT list is not in GROUP BY clause and contains nonaggregated column &#39;wuwenlun.user_phone.id&#39; which is not functionally dependent on columns in GROUP BY clause; this is incompatible with sql_mode&#x3D;only_full_group_by</span><br></pre></td></tr></table></figure>
+
+<p>意思是说<code>sql_mode</code>为<code>only_full_group_by</code>，字段中只允许展示分组的那些字段，在本例中即为<code>name</code>，<code>id</code>和<code>phone</code>不允许展示。如果需要展示，就需要改<code>sql_mode</code>，把<code>only_full_group_by</code>去掉。下面的语句中已经没有<code>only_full_group_by</code>了，执行它。</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">set</span> @@session.sql_mode = <span class="string">&#x27;STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION&#x27;</span></span><br></pre></td></tr></table></figure>
+
+<p>再执行查询语句，看看结果：</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">select</span> <span class="keyword">id</span>, <span class="keyword">name</span>, phone, <span class="keyword">max</span>(buy_time) <span class="keyword">as</span> buy_time <span class="keyword">from</span> user_phone <span class="keyword">group</span> <span class="keyword">by</span> <span class="keyword">name</span>;</span><br></pre></td></tr></table></figure>
+
+<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201209201457.png"></p>
+<p>虽然可以执行了，但/并不是我们想要的结果（所有用户最近购买手机的记录），为什么名字为<code>吴文伦</code>的这条记录id为1？就得通过分组的运行机理去分析。根据name分组后找到<code>吴文伦</code>的第一条记录，它是根据记录在表中顺序找到第一个得到的。所以id为<code>1</code>，phone为<code>天语</code>是这样子得到的。</p>
+<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201209202925.png"></p>
+<p>所以，明白机理后，要得到正确答案就很容易了，先倒排序再分组就可以了，这样子最近的记录会排在最前面。</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">select</span> t.* <span class="keyword">from</span> (<span class="keyword">select</span> * <span class="keyword">from</span> user_phone <span class="keyword">order</span> <span class="keyword">by</span> buy_time <span class="keyword">desc</span>) <span class="keyword">as</span> t <span class="keyword">group</span> <span class="keyword">by</span> t.name;</span><br></pre></td></tr></table></figure>
+
+<p>卧槽，咋还是不对呢？没有起到任何效果！这是因为外层查询是group by，mysql会把子查询里的order by当做无效处理了，对group by来说它只关注结果集，跟你排不排序没有关系，所以在sql优化过程中就把子查询排序省略了，毕竟排序是会耗时间和资源的。</p>
+<p>那如何让分组group by情况下分组不失效呢？全网几乎一致的说后面补上limit去影响结果集，语句如下：</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">select</span> t.* <span class="keyword">from</span> (<span class="keyword">select</span> * <span class="keyword">from</span> user_phone <span class="keyword">order</span> <span class="keyword">by</span> buy_time <span class="keyword">desc</span> <span class="keyword">limit</span> <span class="number">9999999</span>) <span class="keyword">as</span> t <span class="keyword">group</span> <span class="keyword">by</span> t.name;</span><br></pre></td></tr></table></figure>
+
+<p>可以得到正确输出：</p>
+<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201212140226.png"></p>
+<p>但是我总觉得这种操作有点变态，我想着换一种方法，就是先分组得到用户名和该用户最近购买手机的日期这两个值，以此为查询条件再回表查询。语句如下：</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">select</span> t.* <span class="keyword">from</span> user_phone t <span class="keyword">where</span> (t.name, t.buy_time) <span class="keyword">in</span> (<span class="keyword">select</span> <span class="keyword">name</span>, <span class="keyword">max</span>(buy_time) <span class="keyword">as</span> buy_time <span class="keyword">from</span> user_phone <span class="keyword">group</span> <span class="keyword">by</span> <span class="keyword">name</span>);</span><br></pre></td></tr></table></figure>
+
+<p>依然能够得到正确答案：</p>
+<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201127174105.png"></p>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/MySQL/" rel="tag"># MySQL</a>
+              <a href="/tags/SQL/" rel="tag"># SQL</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/11/03/%E6%B5%81%E7%95%85%E7%9A%84Python%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0-02%E5%BA%8F%E5%88%97%E6%9E%84%E6%88%90%E7%9A%84%E6%95%B0%E7%BB%84-2-4/" rel="prev" title="流畅的Python学习笔记-02序列构成的数组-2-4">
+      <i class="fa fa-chevron-left"></i> 流畅的Python学习笔记-02序列构成的数组-2-4
+    </a></div>
+      <div class="post-nav-item"></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let { activeClass } = CONFIG.comments;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-5"><a class="nav-link" href="#%E5%BB%BA%E7%AB%8B%E4%B8%80%E5%BC%A0%E8%A1%A8"><span class="nav-number">1.</span> <span class="nav-text">建立一张表</span></a></li><li class="nav-item nav-level-5"><a class="nav-link" href="#%E5%88%86%E7%BB%84%E5%8E%9F%E7%90%86"><span class="nav-number">2.</span> <span class="nav-text">分组原理</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+    <img class="site-author-image" itemprop="image" alt="wu"
+      src="/images/wu_avatar.png">
+  <p class="site-author-name" itemprop="name">wu</p>
+  <div class="site-description" itemprop="description">宇宙的尽头到底是什么</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">16</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">11</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">10</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+	
+	
+	  <!-- require APlayer -->
+	  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/aplayer/dist/APlayer.min.css">
+	  <script src="https://cdn.jsdelivr.net/npm/aplayer/dist/APlayer.min.js"></script>
+      <!-- require MetingJS -->
+	  <script src="https://cdn.jsdelivr.net/npm/meting@2/dist/Meting.min.js"></script>
+      <meting-js
+		server="netease"
+		type="playlist"
+		id="3224891457"
+		list-folded="true">
+	  </meting-js>
+
+	  
+	  
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-heart"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">wu</span>
+</div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+
+<script src="/js/utils.js"></script>
+
+<script src="/js/motion.js"></script>
+
+
+<script src="/js/schemes/muse.js"></script>
+
+
+<script src="/js/next-boot.js"></script>
+
+
+
+
+  
+
+
+
+
+  
+<script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

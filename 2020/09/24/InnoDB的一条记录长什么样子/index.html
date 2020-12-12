@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 5.2.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/all.min.css">
+
+<script id="hexo-configurations">
+    var NexT = window.NexT || {};
+    var CONFIG = {"hostname":"example.com","root":"/","scheme":"Muse","version":"7.8.0","exturl":false,"sidebar":{"position":"left","display":"always","padding":18,"offset":12,"onmobile":false},"copycode":{"enable":false,"show_result":false,"style":null},"back2top":{"enable":true,"sidebar":false,"scrollpercent":false},"bookmark":{"enable":false,"color":"#222","save":"auto"},"fancybox":false,"mediumzoom":false,"lazyload":false,"pangu":false,"comments":{"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},"algolia":{"hits":{"per_page":10},"labels":{"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}},"localsearch":{"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},"motion":{"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}},"path":"search.xml"};
+  </script>
+
+  <meta name="description" content="InnoDB的一条记录长什么样子">
+<meta property="og:type" content="article">
+<meta property="og:title" content="InnoDB的一条记录长什么样子">
+<meta property="og:url" content="http://example.com/2020/09/24/InnoDB%E7%9A%84%E4%B8%80%E6%9D%A1%E8%AE%B0%E5%BD%95%E9%95%BF%E4%BB%80%E4%B9%88%E6%A0%B7%E5%AD%90/index.html">
+<meta property="og:site_name" content="科学尽头是神学">
+<meta property="og:description" content="InnoDB的一条记录长什么样子">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:image" content="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201028143018.png">
+<meta property="og:image" content="https://gitee.com/wuwenlun/img-bed/raw/master/img/20200924154248.jpg">
+<meta property="og:image" content="https://gitee.com/wuwenlun/img-bed/raw/master/img/20200924154247.jpg">
+<meta property="og:image" content="https://gitee.com/wuwenlun/img-bed/raw/master/img/20200924154249.jpg">
+<meta property="og:image" content="https://gitee.com/wuwenlun/img-bed/raw/master/img/20200924154250.jpg">
+<meta property="article:published_time" content="2020-09-24T07:36:26.000Z">
+<meta property="article:modified_time" content="2020-12-12T06:11:20.726Z">
+<meta property="article:author" content="wu">
+<meta property="article:tag" content="MySQL">
+<meta property="article:tag" content="InnoDB">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201028143018.png">
+
+<link rel="canonical" href="http://example.com/2020/09/24/InnoDB%E7%9A%84%E4%B8%80%E6%9D%A1%E8%AE%B0%E5%BD%95%E9%95%BF%E4%BB%80%E4%B9%88%E6%A0%B7%E5%AD%90/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome : false,
+    isPost : true,
+    lang   : 'zh-CN'
+  };
+</script>
+
+  <title>InnoDB的一条记录长什么样子 | 科学尽头是神学</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+
+  <div class="site-meta">
+
+    <a href="/" class="brand" rel="start">
+      <span class="logo-line-before"><i></i></span>
+      <h1 class="site-title">科学尽头是神学</h1>
+      <span class="logo-line-after"><i></i></span>
+    </a>
+      <p class="site-subtitle" itemprop="description">于桃子，我爱你</p>
+  </div>
+
+  <div class="site-nav-right">
+    <div class="toggle popup-trigger">
+        <i class="fa fa-search fa-fw fa-lg"></i>
+    </div>
+  </div>
+</div>
+
+
+
+
+<nav class="site-nav">
+  <ul id="menu" class="main-menu menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-home fa-fw"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-tags fa-fw"></i>标签</a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-th fa-fw"></i>分类</a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-archive fa-fw"></i>归档</a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+</nav>
+
+
+
+  <div class="search-pop-overlay">
+    <div class="popup search-popup">
+        <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocapitalize="off"
+           placeholder="搜索..." spellcheck="false"
+           type="search" class="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result">
+  <div id="no-result">
+    <i class="fa fa-spinner fa-pulse fa-5x fa-fw"></i>
+  </div>
+</div>
+
+    </div>
+  </div>
+
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content post posts-expand">
+            
+
+    
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block" lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://example.com/2020/09/24/InnoDB%E7%9A%84%E4%B8%80%E6%9D%A1%E8%AE%B0%E5%BD%95%E9%95%BF%E4%BB%80%E4%B9%88%E6%A0%B7%E5%AD%90/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/wu_avatar.png">
+      <meta itemprop="name" content="wu">
+      <meta itemprop="description" content="宇宙的尽头到底是什么">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="科学尽头是神学">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          InnoDB的一条记录长什么样子
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="far fa-calendar"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-09-24 15:36:26" itemprop="dateCreated datePublished" datetime="2020-09-24T15:36:26+08:00">2020-09-24</time>
+            </span>
+              <span class="post-meta-item">
+                <span class="post-meta-item-icon">
+                  <i class="far fa-calendar-check"></i>
+                </span>
+                <span class="post-meta-item-text">更新于</span>
+                <time title="修改时间：2020-12-12 14:11:20" itemprop="dateModified" datetime="2020-12-12T14:11:20+08:00">2020-12-12</time>
+              </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="far fa-folder"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/MySQL/" itemprop="url" rel="index"><span itemprop="name">MySQL</span></a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/MySQL/InnoDB/" itemprop="url" rel="index"><span itemprop="name">InnoDB</span></a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>InnoDB的一条记录长什么样子</p>
+<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201028143018.png"></p>
+<a id="more"></a>
+
+<h2 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h2><p>前文介绍了 MySQL 的基本架构，大体上可以分为「Server 层」和「存储引擎层」两部分。</p>
+<p>其中存储引擎包括多种，它们存储数据的形式也不尽相同。有的存储引擎（比如 Memory 引擎）只把数据存储在内存、并不会持久化到磁盘，这样一旦服务器挂了，数据就没了。而默认的 InnoDB 引擎则会把数据持久化到磁盘中。</p>
+<p>那么，我们插入的一条记录在 InnoDB 引擎中以什么格式存储的呢？本文进一步介绍和分析。</p>
+<h2 id="InnoDB-记录格式"><a href="#InnoDB-记录格式" class="headerlink" title="InnoDB 记录格式"></a>InnoDB 记录格式</h2><h3 id="页"><a href="#页" class="headerlink" title="页"></a>页</h3><p>在分析 InnoDB 的行记录格式前，先简单介绍下「页」的概念。</p>
+<p>InnoDB 将存储的数据划分为若干个「页」，以页作为磁盘和内存交互的基本单位，一个页的大小默认为 16KB。可以通过下面命令查看默认页的大小（单位是字节）：</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">mysql&gt; show status like &#x27;innodb_page_size&#x27;;</span><br><span class="line">+<span class="comment">------------------+-------+</span></span><br><span class="line">| Variable_name    | Value |</span><br><span class="line">+<span class="comment">------------------+-------+</span></span><br><span class="line">| Innodb_page_size | 16384 |</span><br><span class="line">+<span class="comment">------------------+-------+</span></span><br><span class="line">1 row in <span class="keyword">set</span> (<span class="number">0.01</span> sec)</span><br></pre></td></tr></table></figure>
+
+<p>也就是说，即便我们只查询一条记录，InnoDB 也会把至少 16KB 的内容从磁盘读到内存中。</p>
+<h3 id="记录格式"><a href="#记录格式" class="headerlink" title="记录格式"></a>记录格式</h3><p>InnoDB 的行格式有四种，分别是 Compact、Redundant、Dynamic 和 Compressed，它们在原理上大体都是相同的。本文主要分析 Compact 格式。</p>
+<p>可以使用下面命令查看默认行格式（此处 MySQL 版本为 5.7）：</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br></pre></td><td class="code"><pre><span class="line">mysql&gt; show variables like &#x27;innodb_default_row_format&#x27;;</span><br><span class="line">+<span class="comment">---------------------------+---------+</span></span><br><span class="line">| Variable_name             | Value   |</span><br><span class="line">+<span class="comment">---------------------------+---------+</span></span><br><span class="line">| innodb_default_row_format | dynamic |</span><br><span class="line">+<span class="comment">---------------------------+---------+</span></span><br><span class="line">1 row in <span class="keyword">set</span> (<span class="number">0.00</span> sec)</span><br><span class="line"></span><br><span class="line"><span class="comment"># 或者</span></span><br><span class="line">mysql&gt; <span class="keyword">SELECT</span> @@innodb_default_row_format;</span><br><span class="line">+<span class="comment">-----------------------------+</span></span><br><span class="line">| @@innodb_default_row_format |</span><br><span class="line">+<span class="comment">-----------------------------+</span></span><br><span class="line">| dynamic                     |</span><br><span class="line">+<span class="comment">-----------------------------+</span></span><br><span class="line">1 row in <span class="keyword">set</span> (<span class="number">0.00</span> sec)</span><br></pre></td></tr></table></figure>
+
+<p>也可以在建表时指定行格式，或者建表后再修改。</p>
+<p>Compact 行格式的结构大概如图所示：</p>
+<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20200924154248.jpg" alt="img"></p>
+<p>主要分为两部分：记录的额外信息和记录的真实数据。下面分别介绍。</p>
+<h3 id="额外信息"><a href="#额外信息" class="headerlink" title="额外信息"></a>额外信息</h3><p>为便于举例分析，这里先建一个表如下：</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line">mysql&gt; show create table t1\G;</span><br><span class="line">*************************** 1. row ***************************</span><br><span class="line">       Table: t1</span><br><span class="line"><span class="keyword">Create</span> <span class="keyword">Table</span>: <span class="keyword">CREATE</span> <span class="keyword">TABLE</span> <span class="string">`t1`</span> (</span><br><span class="line">  <span class="string">`c1`</span> <span class="built_in">varchar</span>(<span class="number">10</span>) <span class="keyword">DEFAULT</span> <span class="literal">NULL</span>,</span><br><span class="line">  <span class="string">`c2`</span> <span class="built_in">varchar</span>(<span class="number">10</span>) <span class="keyword">NOT</span> <span class="literal">NULL</span>,</span><br><span class="line">  <span class="string">`c3`</span> <span class="built_in">char</span>(<span class="number">10</span>) <span class="keyword">DEFAULT</span> <span class="literal">NULL</span>,</span><br><span class="line">  <span class="string">`c4`</span> <span class="built_in">varchar</span>(<span class="number">10</span>) <span class="keyword">DEFAULT</span> <span class="literal">NULL</span></span><br><span class="line">) <span class="keyword">ENGINE</span>=<span class="keyword">InnoDB</span> <span class="keyword">DEFAULT</span> <span class="keyword">CHARSET</span>=latin1</span><br><span class="line"><span class="number">1</span> <span class="keyword">row</span> <span class="keyword">in</span> <span class="keyword">set</span> (<span class="number">0.00</span> sec)</span><br></pre></td></tr></table></figure>
+
+<h4 id="变长字段长度列表"><a href="#变长字段长度列表" class="headerlink" title="变长字段长度列表"></a>变长字段长度列表</h4><ul>
+<li>概念说明</li>
+</ul>
+<p>MySQL 中有些类型的字段长度是不固定的，比如 VARCHAR(M) 类型、TEXT 等，这就导致每条记录中该字段的「实际」长度可能是不一样的。</p>
+<p>为此，MySQL 在存储这些变长类型的数据时，实际上分成了两部分存储，分别是：</p>
+<ol>
+<li>真实的数据</li>
+<li>数据占用的字节数</li>
+</ol>
+<p>其中数据占用的字节数就保存在「变长字段长度列表」中。它是以列的「逆序」存储表中变长字段的实际长度的。</p>
+<ul>
+<li>举例分析</li>
+</ul>
+<p>以上面的 t1 表为例，它的变长字段为 c1、c2、c4，若有一条数据如下：</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">mysql&gt; select * from t1;</span><br><span class="line">+<span class="comment">------+----+------+------+</span></span><br><span class="line">| c1   | c2 | c3   | c4   |</span><br><span class="line">+<span class="comment">------+----+------+------+</span></span><br><span class="line">| a    | bb | ccc  | dddd |</span><br><span class="line">+<span class="comment">------+----+------+------+</span></span><br><span class="line">1 row in <span class="keyword">set</span> (<span class="number">0.00</span> sec)</span><br></pre></td></tr></table></figure>
+
+<p>则这三个字段占用的字节数分别为：1、2、4，以「逆序」存放在变长字段长度列表为 040201（十六进制）。</p>
+<blockquote>
+<p>PS: 字节数跟字符集有关系，latin1 字符默认占用一个字节。 </p>
+</blockquote>
+<h4 id="NULL-值列表"><a href="#NULL-值列表" class="headerlink" title="NULL 值列表"></a>NULL 值列表</h4><ul>
+<li>概念说明</li>
+</ul>
+<p>MySQL 中有些列是允许为 NULL 的，如果这些列很多、每个 NULL 值都在表中存储的话会很占用空间。Compact 把这些 NULL 统一管理了起来，放到了 NULL 值列表。</p>
+<p>它的处理过程如下：</p>
+<ol>
+<li><p>统计表中允许为 NULL 的列</p>
+</li>
+<li><ol>
+<li>若列都不允许为 NULL，则 NULL 值列表就不存在了；</li>
+<li>否则，以一个「二进制位」来表示一个允许为空的列，仍是「逆序」排列，其中 1 表示 NULL，0 表示非 NULL </li>
+</ol>
+</li>
+<li><p>若 NULL 值列表不足整数「字节」，在高位补 0</p>
+</li>
+</ol>
+<ul>
+<li>举例分析</li>
+</ul>
+<p>以上面 t1 表为例，c1、c3、c4 三列都允许为 NULL，则使用 3 位表示三个允许为空的列，不足一个字节（8 位），因此高 5 位补 0，如图所示：</p>
+<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20200924154247.jpg" alt="img"></p>
+<p>再插入一条数据（’a’, ‘bb’, NULL, NULL）：</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">mysql&gt; select * from t1;</span><br><span class="line">+<span class="comment">------+----+------+------+</span></span><br><span class="line">| c1   | c2 | c3   | c4   |</span><br><span class="line">+<span class="comment">------+----+------+------+</span></span><br><span class="line">| a    | bb | ccc  | dddd |</span><br><span class="line">| a    | bb | NULL | NULL |</span><br><span class="line">+<span class="comment">------+----+------+------+</span></span><br><span class="line">2 rows in <span class="keyword">set</span> (<span class="number">0.00</span> sec)</span><br></pre></td></tr></table></figure>
+
+<p>由于第一条记录的字段都不是 NULL，因此它的 NULL 值列表为：0000 0000；</p>
+<p>第二条记录的 c3、c4 列为 NULL，它的 NULL 值列表为：0000 0110。</p>
+<h4 id="记录头信息"><a href="#记录头信息" class="headerlink" title="记录头信息"></a>记录头信息</h4><p>第三部分是记录头信息（个人觉得有点类似 JVM 中的对象头信息），该部分占用 5 个字节，示意图如下：</p>
+<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20200924154249.jpg" alt="img"></p>
+<p>其中各个部分大概说明如下：</p>
+<ul>
+<li>前两个预留位：暂无用处（各占 1 位）</li>
+<li>delete_mask：1 位，标记该条记录是否被删除</li>
+<li>min_rec_mask：1位，B+树每层非叶子节点中的最小记录都会添加该标记</li>
+<li>n_owned：4 位，当前记录拥有的记录数</li>
+<li>heap_no：13 位，当前记录在记录堆的位置</li>
+<li>record_type：3 位，记录的类型，记录分为多种类型，使用该位做区分</li>
+<li>next_record：16 位，保存下一条记录的相对位置</li>
+</ul>
+<p>这些东西似乎有点多，其中大部分跟索引和页有关，后文再介绍页的时候再分析。</p>
+<h3 id="真实数据"><a href="#真实数据" class="headerlink" title="真实数据"></a>真实数据</h3><p>总算到了真实的数据部分，但这部分其实也并非只有我们自定义的列，大体可分为两部分：隐藏列和自定义数据。</p>
+<h4 id="隐藏列"><a href="#隐藏列" class="headerlink" title="隐藏列"></a>隐藏列</h4><p>这部分是 InnoDB 默认添加的列。主要包括三部分：</p>
+<h5 id="row-id"><a href="#row-id" class="headerlink" title="row_id"></a>row_id</h5><p>真实名称为 DB_ROW_ID，表示行记录的唯一标识，这一列并不是必须的。</p>
+<p>说起 row_id，有必要提一下 InnoDB 的主键生成策略，它遵循如下顺序：</p>
+<ol>
+<li>优先使用用户定义的主键</li>
+<li>若未定义主键，则选取唯一键作为主键</li>
+<li>若无唯一键，添加 row_id 作为主键</li>
+</ol>
+<p>即，当我们新建一个表时，若没有指定主键（Primary Key），InnoDB 会选择一个唯一键（Unique Key）作为主键，如果表中唯一键也没定义，则就要添加一个 row_id 来充当主键了。因为还要自己生成 id，这样会降低效率。</p>
+<p>阿里巴巴的《Java开发手册》中有一条相关规定：</p>
+<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20200924154250.jpg" alt="img"></p>
+<h5 id="transaction-id-amp-roll-pointer"><a href="#transaction-id-amp-roll-pointer" class="headerlink" title="transaction_id &amp; roll_pointer"></a>transaction_id &amp; roll_pointer</h5><p>transaction_id 的真实名称为 DB_TRX_ID，表示事务的 id；roll_pointer 真实名称为 DB_ROLL_PTR，表示回滚指针。</p>
+<p>这二者都跟事务密切相关，而且都是必须的，后面再进行分析。</p>
+<h3 id="我们自定义的数据列"><a href="#我们自定义的数据列" class="headerlink" title="我们自定义的数据列"></a>我们自定义的数据列</h3><p>这部分才是我们真正的自定义的列的数据，以 t1 表为例，就是我们定义的 c1、c2、c3、c4 这四列的数据，不再赘述。</p>
+<h2 id="参考资料"><a href="#参考资料" class="headerlink" title="参考资料"></a>参考资料</h2><ul>
+<li><a target="_blank" rel="noopener" href="https://zhuanlan.zhihu.com/p/147387036">https://zhuanlan.zhihu.com/p/147387036</a></li>
+</ul>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/MySQL/" rel="tag"># MySQL</a>
+              <a href="/tags/InnoDB/" rel="tag"># InnoDB</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/09/22/HashMap%E7%9A%84%E6%AD%BB%E5%BE%AA%E7%8E%AF/" rel="prev" title="HashMap的死循环">
+      <i class="fa fa-chevron-left"></i> HashMap的死循环
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/09/24/InnoDB%E4%B8%80%E6%A3%B5B+%E6%A0%91%E5%8F%AF%E4%BB%A5%E5%AD%98%E6%94%BE%E5%A4%9A%E5%B0%91%E8%A1%8C%E6%95%B0%E6%8D%AE/" rel="next" title="InnoDB一棵B+树可以存放多少行数据">
+      InnoDB一棵B+树可以存放多少行数据 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let { activeClass } = CONFIG.comments;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#%E5%89%8D%E8%A8%80"><span class="nav-number">1.</span> <span class="nav-text">前言</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#InnoDB-%E8%AE%B0%E5%BD%95%E6%A0%BC%E5%BC%8F"><span class="nav-number">2.</span> <span class="nav-text">InnoDB 记录格式</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#%E9%A1%B5"><span class="nav-number">2.1.</span> <span class="nav-text">页</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#%E8%AE%B0%E5%BD%95%E6%A0%BC%E5%BC%8F"><span class="nav-number">2.2.</span> <span class="nav-text">记录格式</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#%E9%A2%9D%E5%A4%96%E4%BF%A1%E6%81%AF"><span class="nav-number">2.3.</span> <span class="nav-text">额外信息</span></a><ol class="nav-child"><li class="nav-item nav-level-4"><a class="nav-link" href="#%E5%8F%98%E9%95%BF%E5%AD%97%E6%AE%B5%E9%95%BF%E5%BA%A6%E5%88%97%E8%A1%A8"><span class="nav-number">2.3.1.</span> <span class="nav-text">变长字段长度列表</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#NULL-%E5%80%BC%E5%88%97%E8%A1%A8"><span class="nav-number">2.3.2.</span> <span class="nav-text">NULL 值列表</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#%E8%AE%B0%E5%BD%95%E5%A4%B4%E4%BF%A1%E6%81%AF"><span class="nav-number">2.3.3.</span> <span class="nav-text">记录头信息</span></a></li></ol></li><li class="nav-item nav-level-3"><a class="nav-link" href="#%E7%9C%9F%E5%AE%9E%E6%95%B0%E6%8D%AE"><span class="nav-number">2.4.</span> <span class="nav-text">真实数据</span></a><ol class="nav-child"><li class="nav-item nav-level-4"><a class="nav-link" href="#%E9%9A%90%E8%97%8F%E5%88%97"><span class="nav-number">2.4.1.</span> <span class="nav-text">隐藏列</span></a><ol class="nav-child"><li class="nav-item nav-level-5"><a class="nav-link" href="#row-id"><span class="nav-number">2.4.1.1.</span> <span class="nav-text">row_id</span></a></li><li class="nav-item nav-level-5"><a class="nav-link" href="#transaction-id-amp-roll-pointer"><span class="nav-number">2.4.1.2.</span> <span class="nav-text">transaction_id &amp; roll_pointer</span></a></li></ol></li></ol></li><li class="nav-item nav-level-3"><a class="nav-link" href="#%E6%88%91%E4%BB%AC%E8%87%AA%E5%AE%9A%E4%B9%89%E7%9A%84%E6%95%B0%E6%8D%AE%E5%88%97"><span class="nav-number">2.5.</span> <span class="nav-text">我们自定义的数据列</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E5%8F%82%E8%80%83%E8%B5%84%E6%96%99"><span class="nav-number">3.</span> <span class="nav-text">参考资料</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+    <img class="site-author-image" itemprop="image" alt="wu"
+      src="/images/wu_avatar.png">
+  <p class="site-author-name" itemprop="name">wu</p>
+  <div class="site-description" itemprop="description">宇宙的尽头到底是什么</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">16</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">11</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">10</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+	
+	
+	  <!-- require APlayer -->
+	  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/aplayer/dist/APlayer.min.css">
+	  <script src="https://cdn.jsdelivr.net/npm/aplayer/dist/APlayer.min.js"></script>
+      <!-- require MetingJS -->
+	  <script src="https://cdn.jsdelivr.net/npm/meting@2/dist/Meting.min.js"></script>
+      <meting-js
+		server="netease"
+		type="playlist"
+		id="3224891457"
+		list-folded="true">
+	  </meting-js>
+
+	  
+	  
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-heart"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">wu</span>
+</div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+
+<script src="/js/utils.js"></script>
+
+<script src="/js/motion.js"></script>
+
+
+<script src="/js/schemes/muse.js"></script>
+
+
+<script src="/js/next-boot.js"></script>
+
+
+
+
+  
+
+
+
+
+  
+<script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>
