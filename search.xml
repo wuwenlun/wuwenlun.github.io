@@ -1,179 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <search>
   <entry>
-    <title>InnoDB的一条记录长什么样子</title>
-    <url>/2020/09/24/InnoDB%E7%9A%84%E4%B8%80%E6%9D%A1%E8%AE%B0%E5%BD%95%E9%95%BF%E4%BB%80%E4%B9%88%E6%A0%B7%E5%AD%90/</url>
-    <content><![CDATA[<link rel="stylesheet" class="aplayer-secondary-style-marker" href="\assets\css\APlayer.min.css"><script src="\assets\js\APlayer.min.js" class="aplayer-secondary-script-marker"></script><script class="meting-secondary-script-marker" src="\assets\js\Meting.min.js"></script><p>InnoDB的一条记录长什么样子</p>
-<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201028143018.png"></p>
-<a id="more"></a>
-
-<h2 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h2><p>前文介绍了 MySQL 的基本架构，大体上可以分为「Server 层」和「存储引擎层」两部分。</p>
-<p>其中存储引擎包括多种，它们存储数据的形式也不尽相同。有的存储引擎（比如 Memory 引擎）只把数据存储在内存、并不会持久化到磁盘，这样一旦服务器挂了，数据就没了。而默认的 InnoDB 引擎则会把数据持久化到磁盘中。</p>
-<p>那么，我们插入的一条记录在 InnoDB 引擎中以什么格式存储的呢？本文进一步介绍和分析。</p>
-<h2 id="InnoDB-记录格式"><a href="#InnoDB-记录格式" class="headerlink" title="InnoDB 记录格式"></a>InnoDB 记录格式</h2><h3 id="页"><a href="#页" class="headerlink" title="页"></a>页</h3><p>在分析 InnoDB 的行记录格式前，先简单介绍下「页」的概念。</p>
-<p>InnoDB 将存储的数据划分为若干个「页」，以页作为磁盘和内存交互的基本单位，一个页的大小默认为 16KB。可以通过下面命令查看默认页的大小（单位是字节）：</p>
-<figure class="highlight sql"><table><tr><td class="code"><pre><span class="line">mysql&gt; show status like &#x27;innodb_page_size&#x27;;</span><br><span class="line">+<span class="comment">------------------+-------+</span></span><br><span class="line">| Variable_name    | Value |</span><br><span class="line">+<span class="comment">------------------+-------+</span></span><br><span class="line">| Innodb_page_size | 16384 |</span><br><span class="line">+<span class="comment">------------------+-------+</span></span><br><span class="line">1 row in <span class="keyword">set</span> (<span class="number">0.01</span> sec)</span><br></pre></td></tr></table></figure>
-
-<p>也就是说，即便我们只查询一条记录，InnoDB 也会把至少 16KB 的内容从磁盘读到内存中。</p>
-<h3 id="记录格式"><a href="#记录格式" class="headerlink" title="记录格式"></a>记录格式</h3><p>InnoDB 的行格式有四种，分别是 Compact、Redundant、Dynamic 和 Compressed，它们在原理上大体都是相同的。本文主要分析 Compact 格式。</p>
-<p>可以使用下面命令查看默认行格式（此处 MySQL 版本为 5.7）：</p>
-<figure class="highlight sql"><table><tr><td class="code"><pre><span class="line">mysql&gt; show variables like &#x27;innodb_default_row_format&#x27;;</span><br><span class="line">+<span class="comment">---------------------------+---------+</span></span><br><span class="line">| Variable_name             | Value   |</span><br><span class="line">+<span class="comment">---------------------------+---------+</span></span><br><span class="line">| innodb_default_row_format | dynamic |</span><br><span class="line">+<span class="comment">---------------------------+---------+</span></span><br><span class="line">1 row in <span class="keyword">set</span> (<span class="number">0.00</span> sec)</span><br><span class="line"></span><br><span class="line"><span class="comment"># 或者</span></span><br><span class="line">mysql&gt; <span class="keyword">SELECT</span> @@innodb_default_row_format;</span><br><span class="line">+<span class="comment">-----------------------------+</span></span><br><span class="line">| @@innodb_default_row_format |</span><br><span class="line">+<span class="comment">-----------------------------+</span></span><br><span class="line">| dynamic                     |</span><br><span class="line">+<span class="comment">-----------------------------+</span></span><br><span class="line">1 row in <span class="keyword">set</span> (<span class="number">0.00</span> sec)</span><br></pre></td></tr></table></figure>
-
-<p>也可以在建表时指定行格式，或者建表后再修改。</p>
-<p>Compact 行格式的结构大概如图所示：</p>
-<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20200924154248.jpg" alt="img"></p>
-<p>主要分为两部分：记录的额外信息和记录的真实数据。下面分别介绍。</p>
-<h3 id="额外信息"><a href="#额外信息" class="headerlink" title="额外信息"></a>额外信息</h3><p>为便于举例分析，这里先建一个表如下：</p>
-<figure class="highlight sql"><table><tr><td class="code"><pre><span class="line">mysql&gt; show create table t1\G;</span><br><span class="line">*************************** 1. row ***************************</span><br><span class="line">       Table: t1</span><br><span class="line"><span class="keyword">Create</span> <span class="keyword">Table</span>: <span class="keyword">CREATE</span> <span class="keyword">TABLE</span> <span class="string">`t1`</span> (</span><br><span class="line">  <span class="string">`c1`</span> <span class="built_in">varchar</span>(<span class="number">10</span>) <span class="keyword">DEFAULT</span> <span class="literal">NULL</span>,</span><br><span class="line">  <span class="string">`c2`</span> <span class="built_in">varchar</span>(<span class="number">10</span>) <span class="keyword">NOT</span> <span class="literal">NULL</span>,</span><br><span class="line">  <span class="string">`c3`</span> <span class="built_in">char</span>(<span class="number">10</span>) <span class="keyword">DEFAULT</span> <span class="literal">NULL</span>,</span><br><span class="line">  <span class="string">`c4`</span> <span class="built_in">varchar</span>(<span class="number">10</span>) <span class="keyword">DEFAULT</span> <span class="literal">NULL</span></span><br><span class="line">) <span class="keyword">ENGINE</span>=<span class="keyword">InnoDB</span> <span class="keyword">DEFAULT</span> <span class="keyword">CHARSET</span>=latin1</span><br><span class="line"><span class="number">1</span> <span class="keyword">row</span> <span class="keyword">in</span> <span class="keyword">set</span> (<span class="number">0.00</span> sec)</span><br></pre></td></tr></table></figure>
-
-<h4 id="变长字段长度列表"><a href="#变长字段长度列表" class="headerlink" title="变长字段长度列表"></a>变长字段长度列表</h4><ul>
-<li>概念说明</li>
-</ul>
-<p>MySQL 中有些类型的字段长度是不固定的，比如 VARCHAR(M) 类型、TEXT 等，这就导致每条记录中该字段的「实际」长度可能是不一样的。</p>
-<p>为此，MySQL 在存储这些变长类型的数据时，实际上分成了两部分存储，分别是：</p>
-<ol>
-<li>真实的数据</li>
-<li>数据占用的字节数</li>
-</ol>
-<p>其中数据占用的字节数就保存在「变长字段长度列表」中。它是以列的「逆序」存储表中变长字段的实际长度的。</p>
-<ul>
-<li>举例分析</li>
-</ul>
-<p>以上面的 t1 表为例，它的变长字段为 c1、c2、c4，若有一条数据如下：</p>
-<figure class="highlight sql"><table><tr><td class="code"><pre><span class="line">mysql&gt; select * from t1;</span><br><span class="line">+<span class="comment">------+----+------+------+</span></span><br><span class="line">| c1   | c2 | c3   | c4   |</span><br><span class="line">+<span class="comment">------+----+------+------+</span></span><br><span class="line">| a    | bb | ccc  | dddd |</span><br><span class="line">+<span class="comment">------+----+------+------+</span></span><br><span class="line">1 row in <span class="keyword">set</span> (<span class="number">0.00</span> sec)</span><br></pre></td></tr></table></figure>
-
-<p>则这三个字段占用的字节数分别为：1、2、4，以「逆序」存放在变长字段长度列表为 040201（十六进制）。</p>
-<blockquote>
-<p>PS: 字节数跟字符集有关系，latin1 字符默认占用一个字节。 </p>
-</blockquote>
-<h4 id="NULL-值列表"><a href="#NULL-值列表" class="headerlink" title="NULL 值列表"></a>NULL 值列表</h4><ul>
-<li>概念说明</li>
-</ul>
-<p>MySQL 中有些列是允许为 NULL 的，如果这些列很多、每个 NULL 值都在表中存储的话会很占用空间。Compact 把这些 NULL 统一管理了起来，放到了 NULL 值列表。</p>
-<p>它的处理过程如下：</p>
-<ol>
-<li><p>统计表中允许为 NULL 的列</p>
-</li>
-<li><ol>
-<li>若列都不允许为 NULL，则 NULL 值列表就不存在了；</li>
-<li>否则，以一个「二进制位」来表示一个允许为空的列，仍是「逆序」排列，其中 1 表示 NULL，0 表示非 NULL </li>
-</ol>
-</li>
-<li><p>若 NULL 值列表不足整数「字节」，在高位补 0</p>
-</li>
-</ol>
-<ul>
-<li>举例分析</li>
-</ul>
-<p>以上面 t1 表为例，c1、c3、c4 三列都允许为 NULL，则使用 3 位表示三个允许为空的列，不足一个字节（8 位），因此高 5 位补 0，如图所示：</p>
-<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20200924154247.jpg" alt="img"></p>
-<p>再插入一条数据（’a’, ‘bb’, NULL, NULL）：</p>
-<figure class="highlight sql"><table><tr><td class="code"><pre><span class="line">mysql&gt; select * from t1;</span><br><span class="line">+<span class="comment">------+----+------+------+</span></span><br><span class="line">| c1   | c2 | c3   | c4   |</span><br><span class="line">+<span class="comment">------+----+------+------+</span></span><br><span class="line">| a    | bb | ccc  | dddd |</span><br><span class="line">| a    | bb | NULL | NULL |</span><br><span class="line">+<span class="comment">------+----+------+------+</span></span><br><span class="line">2 rows in <span class="keyword">set</span> (<span class="number">0.00</span> sec)</span><br></pre></td></tr></table></figure>
-
-<p>由于第一条记录的字段都不是 NULL，因此它的 NULL 值列表为：0000 0000；</p>
-<p>第二条记录的 c3、c4 列为 NULL，它的 NULL 值列表为：0000 0110。</p>
-<h4 id="记录头信息"><a href="#记录头信息" class="headerlink" title="记录头信息"></a>记录头信息</h4><p>第三部分是记录头信息（个人觉得有点类似 JVM 中的对象头信息），该部分占用 5 个字节，示意图如下：</p>
-<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20200924154249.jpg" alt="img"></p>
-<p>其中各个部分大概说明如下：</p>
-<ul>
-<li>前两个预留位：暂无用处（各占 1 位）</li>
-<li>delete_mask：1 位，标记该条记录是否被删除</li>
-<li>min_rec_mask：1位，B+树每层非叶子节点中的最小记录都会添加该标记</li>
-<li>n_owned：4 位，当前记录拥有的记录数</li>
-<li>heap_no：13 位，当前记录在记录堆的位置</li>
-<li>record_type：3 位，记录的类型，记录分为多种类型，使用该位做区分</li>
-<li>next_record：16 位，保存下一条记录的相对位置</li>
-</ul>
-<p>这些东西似乎有点多，其中大部分跟索引和页有关，后文再介绍页的时候再分析。</p>
-<h3 id="真实数据"><a href="#真实数据" class="headerlink" title="真实数据"></a>真实数据</h3><p>总算到了真实的数据部分，但这部分其实也并非只有我们自定义的列，大体可分为两部分：隐藏列和自定义数据。</p>
-<h4 id="隐藏列"><a href="#隐藏列" class="headerlink" title="隐藏列"></a>隐藏列</h4><p>这部分是 InnoDB 默认添加的列。主要包括三部分：</p>
-<h5 id="row-id"><a href="#row-id" class="headerlink" title="row_id"></a>row_id</h5><p>真实名称为 DB_ROW_ID，表示行记录的唯一标识，这一列并不是必须的。</p>
-<p>说起 row_id，有必要提一下 InnoDB 的主键生成策略，它遵循如下顺序：</p>
-<ol>
-<li>优先使用用户定义的主键</li>
-<li>若未定义主键，则选取唯一键作为主键</li>
-<li>若无唯一键，添加 row_id 作为主键</li>
-</ol>
-<p>即，当我们新建一个表时，若没有指定主键（Primary Key），InnoDB 会选择一个唯一键（Unique Key）作为主键，如果表中唯一键也没定义，则就要添加一个 row_id 来充当主键了。因为还要自己生成 id，这样会降低效率。</p>
-<p>阿里巴巴的《Java开发手册》中有一条相关规定：</p>
-<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20200924154250.jpg" alt="img"></p>
-<h5 id="transaction-id-amp-roll-pointer"><a href="#transaction-id-amp-roll-pointer" class="headerlink" title="transaction_id &amp; roll_pointer"></a>transaction_id &amp; roll_pointer</h5><p>transaction_id 的真实名称为 DB_TRX_ID，表示事务的 id；roll_pointer 真实名称为 DB_ROLL_PTR，表示回滚指针。</p>
-<p>这二者都跟事务密切相关，而且都是必须的，后面再进行分析。</p>
-<h3 id="我们自定义的数据列"><a href="#我们自定义的数据列" class="headerlink" title="我们自定义的数据列"></a>我们自定义的数据列</h3><p>这部分才是我们真正的自定义的列的数据，以 t1 表为例，就是我们定义的 c1、c2、c3、c4 这四列的数据，不再赘述。</p>
-<h2 id="参考资料"><a href="#参考资料" class="headerlink" title="参考资料"></a>参考资料</h2><ul>
-<li><a href="https://zhuanlan.zhihu.com/p/147387036">https://zhuanlan.zhihu.com/p/147387036</a></li>
-</ul>
-]]></content>
-      <categories>
-        <category>MySQL</category>
-        <category>InnoDB</category>
-      </categories>
-      <tags>
-        <tag>MySQL</tag>
-        <tag>InnoDB</tag>
-      </tags>
-  </entry>
-  <entry>
-    <title>MySQL分组下最近的记录</title>
-    <url>/2020/11/27/MySQL%E5%88%86%E7%BB%84%E4%B8%8B%E5%BE%97%E5%88%B0%E6%9C%80%E8%BF%91%E7%9A%84%E8%AE%B0%E5%BD%95/</url>
-    <content><![CDATA[<link rel="stylesheet" class="aplayer-secondary-style-marker" href="\assets\css\APlayer.min.css"><script src="\assets\js\APlayer.min.js" class="aplayer-secondary-script-marker"></script><script class="meting-secondary-script-marker" src="\assets\js\Meting.min.js"></script><p>找到分组条件下最近的一条数据</p>
-<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201127163535.png"></p>
-<a id="more"></a>
-
-<p>对于不是很熟悉SQL的同学说，立马可能会想到排序后再<code>limit 1</code>就搞定了，看到数据后就开始反思了：“这才一条数据，这不是我想要的效果“。有的同学思前想后会写出来，我相信其他大部分同学肯定写不出来，对于这部分同学你们有福了。看了这个段落，就能解决你们的痛点。</p>
-<h5 id="建立一张表"><a href="#建立一张表" class="headerlink" title="建立一张表"></a>建立一张表</h5><p>该表主要记录用户购买手机日期。我相信一个人在他的一生中肯定有购买手机的经历，有的人一生可能只有一部手机（当然这不太可能），有的人有多部手机。根据该表找到所有用户购买手机最近的记录。</p>
-<figure class="highlight sql"><table><tr><td class="code"><pre><span class="line"><span class="keyword">create</span> <span class="keyword">table</span> user_phone (</span><br><span class="line">	<span class="keyword">id</span> <span class="built_in">int</span> <span class="keyword">not</span> <span class="literal">null</span> auto_increment <span class="keyword">comment</span> <span class="string">&#x27;主键&#x27;</span>,</span><br><span class="line">    <span class="keyword">name</span> <span class="built_in">varchar</span>(<span class="number">16</span>) <span class="keyword">comment</span> <span class="string">&#x27;姓名&#x27;</span>,</span><br><span class="line">    phone <span class="built_in">varchar</span>(<span class="number">16</span>) <span class="keyword">comment</span> <span class="string">&#x27;手机型号&#x27;</span>,</span><br><span class="line">    buy_time datetime <span class="keyword">comment</span> <span class="string">&#x27;购买日期&#x27;</span>,</span><br><span class="line">    primary <span class="keyword">key</span>(<span class="keyword">id</span>)</span><br><span class="line">);</span><br><span class="line"></span><br><span class="line"><span class="keyword">insert</span> <span class="keyword">into</span> user_phone (<span class="keyword">name</span>, phone, buy_time) <span class="keyword">values</span> (<span class="string">&quot;吴文伦&quot;</span>, <span class="string">&quot;天语&quot;</span>, <span class="string">&quot;2006-07-12&quot;</span>), (<span class="string">&quot;吴文伦&quot;</span>, <span class="string">&quot;诺基亚&quot;</span>, <span class="string">&quot;2011-08-23&quot;</span>), (<span class="string">&quot;吴文伦&quot;</span>, <span class="string">&quot;中兴&quot;</span>, <span class="string">&quot;2015-04-08&quot;</span>), (<span class="string">&quot;吴文伦&quot;</span>, <span class="string">&quot;魅族&quot;</span>, <span class="string">&quot;2017-12-02&quot;</span>), (<span class="string">&quot;吴文伦&quot;</span>, <span class="string">&quot;红米&quot;</span>, <span class="string">&quot;2020-05-15&quot;</span>);</span><br><span class="line"><span class="keyword">insert</span> <span class="keyword">into</span> user_phone (<span class="keyword">name</span>, phone, buy_time) <span class="keyword">values</span> (<span class="string">&quot;勒布朗&quot;</span>, <span class="string">&quot;大哥大&quot;</span>, <span class="string">&quot;1995-09-16&quot;</span>), (<span class="string">&quot;勒布朗&quot;</span>, <span class="string">&quot;诺基亚&quot;</span>, <span class="string">&quot;2001-03-22&quot;</span>), (<span class="string">&quot;勒布朗&quot;</span>, <span class="string">&quot;苹果1代&quot;</span>, <span class="string">&quot;2007-06-08&quot;</span>), (<span class="string">&quot;勒布朗&quot;</span>, <span class="string">&quot;苹果5代&quot;</span>, <span class="string">&quot;2013-11-09&quot;</span>);</span><br><span class="line"><span class="keyword">insert</span> <span class="keyword">into</span> user_phone (<span class="keyword">name</span>, phone, buy_time) <span class="keyword">values</span> (<span class="string">&quot;老于&quot;</span>, <span class="string">&quot;土砖&quot;</span>, <span class="string">&quot;1994-01-01&quot;</span>), (<span class="string">&quot;老于&quot;</span>, <span class="string">&quot;华为&quot;</span>, <span class="string">&quot;2003-08-09&quot;</span>), (<span class="string">&quot;老于&quot;</span>, <span class="string">&quot;vivo&quot;</span>, <span class="string">&quot;2009-07-08&quot;</span>);</span><br></pre></td></tr></table></figure>
-
-<p>数据列表如下：</p>
-<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201127172045.png"></p>
-<p>如何操作才能找到符合业务要求的数据呢？正确数据如下：</p>
-<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201127174105.png"></p>
-<p>——————————————————————————–华丽的分界线—————————————————————————————-</p>
-<h5 id="分组原理"><a href="#分组原理" class="headerlink" title="分组原理"></a>分组原理</h5><p>表里面有三个人，故应想到对<code>name</code>进行分组，分组后能够得到<font color=red><strong>子数据列表项</strong></font>，然后根据聚合函数<code>max</code>在<font color=red><strong>子数据列表项</strong></font>中找到<code>buy_time</code>这一列中最大的日期的那一个值。聚合函数的作用就是在一堆列表数据里的指定列进行聚合运算合成一个值，注意它只针对字段列。<img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201208200558.png"></p>
-<p>执行该SQL语句会得到如下数据</p>
-<figure class="highlight sql"><table><tr><td class="code"><pre><span class="line"><span class="keyword">select</span> <span class="keyword">name</span>, <span class="keyword">max</span>(buy_time) <span class="keyword">as</span> buy_time <span class="keyword">from</span> user_phone <span class="keyword">group</span> <span class="keyword">by</span> <span class="keyword">name</span>;</span><br></pre></td></tr></table></figure>
-
-<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201209195825.png"></p>
-<p>但是少了id和phone两个字段，很多人可能会想到这样子做：</p>
-<figure class="highlight sql"><table><tr><td class="code"><pre><span class="line"><span class="keyword">select</span> <span class="keyword">id</span>, <span class="keyword">name</span>, phone, <span class="keyword">max</span>(buy_time) <span class="keyword">as</span> buy_time <span class="keyword">from</span> user_phone <span class="keyword">group</span> <span class="keyword">by</span> <span class="keyword">name</span>;</span><br></pre></td></tr></table></figure>
-
-<p>那我们执行以下，结果报错了！！</p>
-<figure class="highlight plain"><table><tr><td class="code"><pre><span class="line">ERROR 1055 (42000): Expression #1 of SELECT list is not in GROUP BY clause and contains nonaggregated column &#39;wuwenlun.user_phone.id&#39; which is not functionally dependent on columns in GROUP BY clause; this is incompatible with sql_mode&#x3D;only_full_group_by</span><br></pre></td></tr></table></figure>
-
-<p>意思是说<code>sql_mode</code>为<code>only_full_group_by</code>，字段中只允许展示分组的那些字段，在本例中即为<code>name</code>，<code>id</code>和<code>phone</code>不允许展示。如果需要展示，就需要改<code>sql_mode</code>，把<code>only_full_group_by</code>去掉。下面的语句中已经没有<code>only_full_group_by</code>了，执行它。</p>
-<figure class="highlight sql"><table><tr><td class="code"><pre><span class="line"><span class="keyword">set</span> @@session.sql_mode = <span class="string">&#x27;STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION&#x27;</span></span><br></pre></td></tr></table></figure>
-
-<p>再执行查询语句，看看结果：</p>
-<figure class="highlight sql"><table><tr><td class="code"><pre><span class="line"><span class="keyword">select</span> <span class="keyword">id</span>, <span class="keyword">name</span>, phone, <span class="keyword">max</span>(buy_time) <span class="keyword">as</span> buy_time <span class="keyword">from</span> user_phone <span class="keyword">group</span> <span class="keyword">by</span> <span class="keyword">name</span>;</span><br></pre></td></tr></table></figure>
-
-<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201209201457.png"></p>
-<p>虽然可以执行了，但/并不是我们想要的结果（所有用户最近购买手机的记录），为什么名字为<code>吴文伦</code>的这条记录id为1？就得通过分组的运行机理去分析。根据name分组后找到<code>吴文伦</code>的第一条记录，它是根据记录在表中顺序找到第一个得到的。所以id为<code>1</code>，phone为<code>天语</code>是这样子得到的。</p>
-<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201209202925.png"></p>
-<p>所以，明白机理后，要得到正确答案就很容易了，先倒排序再分组就可以了，这样子最近的记录会排在最前面。</p>
-<figure class="highlight sql"><table><tr><td class="code"><pre><span class="line"><span class="keyword">select</span> t.* <span class="keyword">from</span> (<span class="keyword">select</span> * <span class="keyword">from</span> user_phone <span class="keyword">order</span> <span class="keyword">by</span> buy_time <span class="keyword">desc</span>) <span class="keyword">as</span> t <span class="keyword">group</span> <span class="keyword">by</span> t.name;</span><br></pre></td></tr></table></figure>
-
-<p>卧槽，咋还是不对呢？没有起到任何效果！这是因为外层查询是group by，mysql会把子查询里的order by当做无效处理了，对group by来说它只关注结果集，跟你排不排序没有关系，所以在sql优化过程中就把子查询排序省略了，毕竟排序是会耗时间和资源的。</p>
-<p>那如何让分组group by情况下分组不失效呢？全网几乎一致的说后面补上limit去影响结果集，语句如下：</p>
-<figure class="highlight sql"><table><tr><td class="code"><pre><span class="line"><span class="keyword">select</span> t.* <span class="keyword">from</span> (<span class="keyword">select</span> * <span class="keyword">from</span> user_phone <span class="keyword">order</span> <span class="keyword">by</span> buy_time <span class="keyword">desc</span> <span class="keyword">limit</span> <span class="number">9999999</span>) <span class="keyword">as</span> t <span class="keyword">group</span> <span class="keyword">by</span> t.name;</span><br></pre></td></tr></table></figure>
-
-<p>可以得到正确输出：</p>
-<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201212140226.png"></p>
-<p>但是我总觉得这种操作有点变态，我想着换一种方法，就是先分组得到用户名和该用户最近购买手机的日期这两个值，以此为查询条件再回表查询。语句如下：</p>
-<figure class="highlight sql"><table><tr><td class="code"><pre><span class="line"><span class="keyword">select</span> t.* <span class="keyword">from</span> user_phone t <span class="keyword">where</span> (t.name, t.buy_time) <span class="keyword">in</span> (<span class="keyword">select</span> <span class="keyword">name</span>, <span class="keyword">max</span>(buy_time) <span class="keyword">as</span> buy_time <span class="keyword">from</span> user_phone <span class="keyword">group</span> <span class="keyword">by</span> <span class="keyword">name</span>);</span><br></pre></td></tr></table></figure>
-
-<p>依然能够得到正确答案：</p>
-<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201127174105.png"></p>
-]]></content>
-      <categories>
-        <category>MySQL</category>
-        <category>SQL</category>
-      </categories>
-      <tags>
-        <tag>MySQL</tag>
-        <tag>SQL</tag>
-      </tags>
-  </entry>
-  <entry>
     <title>InnoDB一棵B+树可以存放多少行数据</title>
     <url>/2020/09/24/InnoDB%E4%B8%80%E6%A3%B5B+%E6%A0%91%E5%8F%AF%E4%BB%A5%E5%AD%98%E6%94%BE%E5%A4%9A%E5%B0%91%E8%A1%8C%E6%95%B0%E6%8D%AE/</url>
     <content><![CDATA[<link rel="stylesheet" class="aplayer-secondary-style-marker" href="\assets\css\APlayer.min.css"><script src="\assets\js\APlayer.min.js" class="aplayer-secondary-script-marker"></script><script class="meting-secondary-script-marker" src="\assets\js\Meting.min.js"></script><p>InnoDB一棵<code>B+</code>树可以存放多少行数据</p>
@@ -335,6 +162,119 @@
       </tags>
   </entry>
   <entry>
+    <title>InnoDB的一条记录长什么样子</title>
+    <url>/2020/09/24/InnoDB%E7%9A%84%E4%B8%80%E6%9D%A1%E8%AE%B0%E5%BD%95%E9%95%BF%E4%BB%80%E4%B9%88%E6%A0%B7%E5%AD%90/</url>
+    <content><![CDATA[<link rel="stylesheet" class="aplayer-secondary-style-marker" href="\assets\css\APlayer.min.css"><script src="\assets\js\APlayer.min.js" class="aplayer-secondary-script-marker"></script><script class="meting-secondary-script-marker" src="\assets\js\Meting.min.js"></script><p>InnoDB的一条记录长什么样子</p>
+<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201028143018.png"></p>
+<a id="more"></a>
+
+<h2 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h2><p>前文介绍了 MySQL 的基本架构，大体上可以分为「Server 层」和「存储引擎层」两部分。</p>
+<p>其中存储引擎包括多种，它们存储数据的形式也不尽相同。有的存储引擎（比如 Memory 引擎）只把数据存储在内存、并不会持久化到磁盘，这样一旦服务器挂了，数据就没了。而默认的 InnoDB 引擎则会把数据持久化到磁盘中。</p>
+<p>那么，我们插入的一条记录在 InnoDB 引擎中以什么格式存储的呢？本文进一步介绍和分析。</p>
+<h2 id="InnoDB-记录格式"><a href="#InnoDB-记录格式" class="headerlink" title="InnoDB 记录格式"></a>InnoDB 记录格式</h2><h3 id="页"><a href="#页" class="headerlink" title="页"></a>页</h3><p>在分析 InnoDB 的行记录格式前，先简单介绍下「页」的概念。</p>
+<p>InnoDB 将存储的数据划分为若干个「页」，以页作为磁盘和内存交互的基本单位，一个页的大小默认为 16KB。可以通过下面命令查看默认页的大小（单位是字节）：</p>
+<figure class="highlight sql"><table><tr><td class="code"><pre><span class="line">mysql&gt; show status like &#x27;innodb_page_size&#x27;;</span><br><span class="line">+<span class="comment">------------------+-------+</span></span><br><span class="line">| Variable_name    | Value |</span><br><span class="line">+<span class="comment">------------------+-------+</span></span><br><span class="line">| Innodb_page_size | 16384 |</span><br><span class="line">+<span class="comment">------------------+-------+</span></span><br><span class="line">1 row in <span class="keyword">set</span> (<span class="number">0.01</span> sec)</span><br></pre></td></tr></table></figure>
+
+<p>也就是说，即便我们只查询一条记录，InnoDB 也会把至少 16KB 的内容从磁盘读到内存中。</p>
+<h3 id="记录格式"><a href="#记录格式" class="headerlink" title="记录格式"></a>记录格式</h3><p>InnoDB 的行格式有四种，分别是 Compact、Redundant、Dynamic 和 Compressed，它们在原理上大体都是相同的。本文主要分析 Compact 格式。</p>
+<p>可以使用下面命令查看默认行格式（此处 MySQL 版本为 5.7）：</p>
+<figure class="highlight sql"><table><tr><td class="code"><pre><span class="line">mysql&gt; show variables like &#x27;innodb_default_row_format&#x27;;</span><br><span class="line">+<span class="comment">---------------------------+---------+</span></span><br><span class="line">| Variable_name             | Value   |</span><br><span class="line">+<span class="comment">---------------------------+---------+</span></span><br><span class="line">| innodb_default_row_format | dynamic |</span><br><span class="line">+<span class="comment">---------------------------+---------+</span></span><br><span class="line">1 row in <span class="keyword">set</span> (<span class="number">0.00</span> sec)</span><br><span class="line"></span><br><span class="line"><span class="comment"># 或者</span></span><br><span class="line">mysql&gt; <span class="keyword">SELECT</span> @@innodb_default_row_format;</span><br><span class="line">+<span class="comment">-----------------------------+</span></span><br><span class="line">| @@innodb_default_row_format |</span><br><span class="line">+<span class="comment">-----------------------------+</span></span><br><span class="line">| dynamic                     |</span><br><span class="line">+<span class="comment">-----------------------------+</span></span><br><span class="line">1 row in <span class="keyword">set</span> (<span class="number">0.00</span> sec)</span><br></pre></td></tr></table></figure>
+
+<p>也可以在建表时指定行格式，或者建表后再修改。</p>
+<p>Compact 行格式的结构大概如图所示：</p>
+<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20200924154248.jpg" alt="img"></p>
+<p>主要分为两部分：记录的额外信息和记录的真实数据。下面分别介绍。</p>
+<h3 id="额外信息"><a href="#额外信息" class="headerlink" title="额外信息"></a>额外信息</h3><p>为便于举例分析，这里先建一个表如下：</p>
+<figure class="highlight sql"><table><tr><td class="code"><pre><span class="line">mysql&gt; show create table t1\G;</span><br><span class="line">*************************** 1. row ***************************</span><br><span class="line">       Table: t1</span><br><span class="line"><span class="keyword">Create</span> <span class="keyword">Table</span>: <span class="keyword">CREATE</span> <span class="keyword">TABLE</span> <span class="string">`t1`</span> (</span><br><span class="line">  <span class="string">`c1`</span> <span class="built_in">varchar</span>(<span class="number">10</span>) <span class="keyword">DEFAULT</span> <span class="literal">NULL</span>,</span><br><span class="line">  <span class="string">`c2`</span> <span class="built_in">varchar</span>(<span class="number">10</span>) <span class="keyword">NOT</span> <span class="literal">NULL</span>,</span><br><span class="line">  <span class="string">`c3`</span> <span class="built_in">char</span>(<span class="number">10</span>) <span class="keyword">DEFAULT</span> <span class="literal">NULL</span>,</span><br><span class="line">  <span class="string">`c4`</span> <span class="built_in">varchar</span>(<span class="number">10</span>) <span class="keyword">DEFAULT</span> <span class="literal">NULL</span></span><br><span class="line">) <span class="keyword">ENGINE</span>=<span class="keyword">InnoDB</span> <span class="keyword">DEFAULT</span> <span class="keyword">CHARSET</span>=latin1</span><br><span class="line"><span class="number">1</span> <span class="keyword">row</span> <span class="keyword">in</span> <span class="keyword">set</span> (<span class="number">0.00</span> sec)</span><br></pre></td></tr></table></figure>
+
+<h4 id="变长字段长度列表"><a href="#变长字段长度列表" class="headerlink" title="变长字段长度列表"></a>变长字段长度列表</h4><ul>
+<li>概念说明</li>
+</ul>
+<p>MySQL 中有些类型的字段长度是不固定的，比如 VARCHAR(M) 类型、TEXT 等，这就导致每条记录中该字段的「实际」长度可能是不一样的。</p>
+<p>为此，MySQL 在存储这些变长类型的数据时，实际上分成了两部分存储，分别是：</p>
+<ol>
+<li>真实的数据</li>
+<li>数据占用的字节数</li>
+</ol>
+<p>其中数据占用的字节数就保存在「变长字段长度列表」中。它是以列的「逆序」存储表中变长字段的实际长度的。</p>
+<ul>
+<li>举例分析</li>
+</ul>
+<p>以上面的 t1 表为例，它的变长字段为 c1、c2、c4，若有一条数据如下：</p>
+<figure class="highlight sql"><table><tr><td class="code"><pre><span class="line">mysql&gt; select * from t1;</span><br><span class="line">+<span class="comment">------+----+------+------+</span></span><br><span class="line">| c1   | c2 | c3   | c4   |</span><br><span class="line">+<span class="comment">------+----+------+------+</span></span><br><span class="line">| a    | bb | ccc  | dddd |</span><br><span class="line">+<span class="comment">------+----+------+------+</span></span><br><span class="line">1 row in <span class="keyword">set</span> (<span class="number">0.00</span> sec)</span><br></pre></td></tr></table></figure>
+
+<p>则这三个字段占用的字节数分别为：1、2、4，以「逆序」存放在变长字段长度列表为 040201（十六进制）。</p>
+<blockquote>
+<p>PS: 字节数跟字符集有关系，latin1 字符默认占用一个字节。 </p>
+</blockquote>
+<h4 id="NULL-值列表"><a href="#NULL-值列表" class="headerlink" title="NULL 值列表"></a>NULL 值列表</h4><ul>
+<li>概念说明</li>
+</ul>
+<p>MySQL 中有些列是允许为 NULL 的，如果这些列很多、每个 NULL 值都在表中存储的话会很占用空间。Compact 把这些 NULL 统一管理了起来，放到了 NULL 值列表。</p>
+<p>它的处理过程如下：</p>
+<ol>
+<li><p>统计表中允许为 NULL 的列</p>
+</li>
+<li><ol>
+<li>若列都不允许为 NULL，则 NULL 值列表就不存在了；</li>
+<li>否则，以一个「二进制位」来表示一个允许为空的列，仍是「逆序」排列，其中 1 表示 NULL，0 表示非 NULL </li>
+</ol>
+</li>
+<li><p>若 NULL 值列表不足整数「字节」，在高位补 0</p>
+</li>
+</ol>
+<ul>
+<li>举例分析</li>
+</ul>
+<p>以上面 t1 表为例，c1、c3、c4 三列都允许为 NULL，则使用 3 位表示三个允许为空的列，不足一个字节（8 位），因此高 5 位补 0，如图所示：</p>
+<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20200924154247.jpg" alt="img"></p>
+<p>再插入一条数据（’a’, ‘bb’, NULL, NULL）：</p>
+<figure class="highlight sql"><table><tr><td class="code"><pre><span class="line">mysql&gt; select * from t1;</span><br><span class="line">+<span class="comment">------+----+------+------+</span></span><br><span class="line">| c1   | c2 | c3   | c4   |</span><br><span class="line">+<span class="comment">------+----+------+------+</span></span><br><span class="line">| a    | bb | ccc  | dddd |</span><br><span class="line">| a    | bb | NULL | NULL |</span><br><span class="line">+<span class="comment">------+----+------+------+</span></span><br><span class="line">2 rows in <span class="keyword">set</span> (<span class="number">0.00</span> sec)</span><br></pre></td></tr></table></figure>
+
+<p>由于第一条记录的字段都不是 NULL，因此它的 NULL 值列表为：0000 0000；</p>
+<p>第二条记录的 c3、c4 列为 NULL，它的 NULL 值列表为：0000 0110。</p>
+<h4 id="记录头信息"><a href="#记录头信息" class="headerlink" title="记录头信息"></a>记录头信息</h4><p>第三部分是记录头信息（个人觉得有点类似 JVM 中的对象头信息），该部分占用 5 个字节，示意图如下：</p>
+<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20200924154249.jpg" alt="img"></p>
+<p>其中各个部分大概说明如下：</p>
+<ul>
+<li>前两个预留位：暂无用处（各占 1 位）</li>
+<li>delete_mask：1 位，标记该条记录是否被删除</li>
+<li>min_rec_mask：1位，B+树每层非叶子节点中的最小记录都会添加该标记</li>
+<li>n_owned：4 位，当前记录拥有的记录数</li>
+<li>heap_no：13 位，当前记录在记录堆的位置</li>
+<li>record_type：3 位，记录的类型，记录分为多种类型，使用该位做区分</li>
+<li>next_record：16 位，保存下一条记录的相对位置</li>
+</ul>
+<p>这些东西似乎有点多，其中大部分跟索引和页有关，后文再介绍页的时候再分析。</p>
+<h3 id="真实数据"><a href="#真实数据" class="headerlink" title="真实数据"></a>真实数据</h3><p>总算到了真实的数据部分，但这部分其实也并非只有我们自定义的列，大体可分为两部分：隐藏列和自定义数据。</p>
+<h4 id="隐藏列"><a href="#隐藏列" class="headerlink" title="隐藏列"></a>隐藏列</h4><p>这部分是 InnoDB 默认添加的列。主要包括三部分：</p>
+<h5 id="row-id"><a href="#row-id" class="headerlink" title="row_id"></a>row_id</h5><p>真实名称为 DB_ROW_ID，表示行记录的唯一标识，这一列并不是必须的。</p>
+<p>说起 row_id，有必要提一下 InnoDB 的主键生成策略，它遵循如下顺序：</p>
+<ol>
+<li>优先使用用户定义的主键</li>
+<li>若未定义主键，则选取唯一键作为主键</li>
+<li>若无唯一键，添加 row_id 作为主键</li>
+</ol>
+<p>即，当我们新建一个表时，若没有指定主键（Primary Key），InnoDB 会选择一个唯一键（Unique Key）作为主键，如果表中唯一键也没定义，则就要添加一个 row_id 来充当主键了。因为还要自己生成 id，这样会降低效率。</p>
+<p>阿里巴巴的《Java开发手册》中有一条相关规定：</p>
+<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20200924154250.jpg" alt="img"></p>
+<h5 id="transaction-id-amp-roll-pointer"><a href="#transaction-id-amp-roll-pointer" class="headerlink" title="transaction_id &amp; roll_pointer"></a>transaction_id &amp; roll_pointer</h5><p>transaction_id 的真实名称为 DB_TRX_ID，表示事务的 id；roll_pointer 真实名称为 DB_ROLL_PTR，表示回滚指针。</p>
+<p>这二者都跟事务密切相关，而且都是必须的，后面再进行分析。</p>
+<h3 id="我们自定义的数据列"><a href="#我们自定义的数据列" class="headerlink" title="我们自定义的数据列"></a>我们自定义的数据列</h3><p>这部分才是我们真正的自定义的列的数据，以 t1 表为例，就是我们定义的 c1、c2、c3、c4 这四列的数据，不再赘述。</p>
+<h2 id="参考资料"><a href="#参考资料" class="headerlink" title="参考资料"></a>参考资料</h2><ul>
+<li><a href="https://zhuanlan.zhihu.com/p/147387036">https://zhuanlan.zhihu.com/p/147387036</a></li>
+</ul>
+]]></content>
+      <categories>
+        <category>MySQL</category>
+        <category>InnoDB</category>
+      </categories>
+      <tags>
+        <tag>MySQL</tag>
+        <tag>InnoDB</tag>
+      </tags>
+  </entry>
+  <entry>
     <title>流畅的Python学习笔记-01数据模型-1-1</title>
     <url>/2020/10/22/%E6%B5%81%E7%95%85%E7%9A%84Python%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0-01%E6%95%B0%E6%8D%AE%E6%A8%A1%E5%9E%8B-1-1/</url>
     <content><![CDATA[<link rel="stylesheet" class="aplayer-secondary-style-marker" href="\assets\css\APlayer.min.css"><script src="\assets\js\APlayer.min.js" class="aplayer-secondary-script-marker"></script><script class="meting-secondary-script-marker" src="\assets\js\Meting.min.js"></script><p>第一章第一节：一摞Python风格的纸牌</p>
@@ -373,34 +313,62 @@
       </tags>
   </entry>
   <entry>
-    <title>流畅的Python学习笔记-01数据模型-1-5</title>
-    <url>/2020/10/28/%E6%B5%81%E7%95%85%E7%9A%84Python%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0-01%E6%95%B0%E6%8D%AE%E6%A8%A1%E5%9E%8B-1-5/</url>
-    <content><![CDATA[<link rel="stylesheet" class="aplayer-secondary-style-marker" href="\assets\css\APlayer.min.css"><script src="\assets\js\APlayer.min.js" class="aplayer-secondary-script-marker"></script><script class="meting-secondary-script-marker" src="\assets\js\Meting.min.js"></script><p>第一章第五节：本章小结以及延申阅读</p>
-<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201028144038.png"></p>
+    <title>MySQL分组下最近的记录</title>
+    <url>/2020/11/27/MySQL%E5%88%86%E7%BB%84%E4%B8%8B%E5%BE%97%E5%88%B0%E6%9C%80%E8%BF%91%E7%9A%84%E8%AE%B0%E5%BD%95/</url>
+    <content><![CDATA[<link rel="stylesheet" class="aplayer-secondary-style-marker" href="\assets\css\APlayer.min.css"><script src="\assets\js\APlayer.min.js" class="aplayer-secondary-script-marker"></script><script class="meting-secondary-script-marker" src="\assets\js\Meting.min.js"></script><p>找到分组条件下最近的一条数据</p>
+<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201127163535.png"></p>
 <a id="more"></a>
 
-<h3 id="本章小结"><a href="#本章小结" class="headerlink" title="本章小结"></a>本章小结</h3><p>通过实现特殊方法，自定义数据类型可以表现得跟内置类型一样，从而让我们写出更具表达力的代码——或者说，更具 Python 风格的代码。</p>
-<p>Python 对象的一个基本要求就是它得有合理的字符串表示形式，我们可以通过 <code>__repr__</code> 和 <code>__str__</code> 来满足这个要求。前者方便我们调试和记录日志，后者则是给终端用户看的。这就是数据模型中存在特殊方法 <code>__repr__</code> 和 <code>__str__</code> 的原因。</p>
-<p>对序列数据类型的模拟是特殊方法用得最多的地方，这一点在FrenchDeck 类的示例中有所展现。在第 2 章中，我们会着重介绍序列数据类型，然后在第 10 章中，我们会把 Vector 类扩展成一个多维的数据类型，通过这个练习你将有机会实现自定义的序列。</p>
-<p>Python 通过<strong>运算符重载</strong>这一模式提供了丰富的数值类型，除了内置的那些之外，还有 <code>decimal.Decimal</code> 和 <code>fractions.Fraction</code>。这些数据类型都支持中缀算术运算符。在第 13 章中，我们还会通过对 Vector类的扩展来学习如何实现这些运算符，当然还会提到如何让运算符满足交换律和增强赋值。</p>
-<p>Python 数据模型的特殊方法还有很多，本书会涵盖其中的绝大部分，探讨如何使用和实现它们。</p>
-<h3 id="延申阅读"><a href="#延申阅读" class="headerlink" title="延申阅读"></a>延申阅读</h3><p>对本章内容和本书主题来说，Python 语言参考手册里的“Data Model”一章（<a href="https://docs.python.org/3/reference/datamodel.html">https://docs.python.org/3/reference/datamodel.html</a>）是最符合规范的知识来源。</p>
-<p>Alex Martelli 的《Python 技术手册（第 2 版）》对数据模型的讲解很精彩。我写这本书的时候，《Python 技术手册》的最新版本是 2006 年出版的，书里用的还是 Python 2.5，但是 Python 关于数据模型的概念并没有太大的变化，而书中 Martelli 对属性访问机制的描述，应该是除了CPython 中的 C 源码之外在这方面最权威的解释。Martelli 还是 StackOverflow 上的高产贡献者，在他名下差不多有 5000 条答案，你也可以去他的 StackOverflow 主页（<a href="http://stackoverflow.com/users/95810/alex-martelli">http://stackoverflow.com/users/95810/alex-martelli</a>）上看看。</p>
-<center>杂谈</center>
+<p>对于不是很熟悉SQL的同学说，立马可能会想到排序后再<code>limit 1</code>就搞定了，看到数据后就开始反思了：“这才一条数据，这不是我想要的效果“。有的同学思前想后会写出来，我相信其他大部分同学肯定写不出来，对于这部分同学你们有福了。看了这个段落，就能解决你们的痛点。</p>
+<h5 id="建立一张表"><a href="#建立一张表" class="headerlink" title="建立一张表"></a>建立一张表</h5><p>该表主要记录用户购买手机日期。我相信一个人在他的一生中肯定有购买手机的经历，有的人一生可能只有一部手机（当然这不太可能），有的人有多部手机。根据该表找到所有用户购买手机最近的记录。</p>
+<figure class="highlight sql"><table><tr><td class="code"><pre><span class="line"><span class="keyword">create</span> <span class="keyword">table</span> user_phone (</span><br><span class="line">	<span class="keyword">id</span> <span class="built_in">int</span> <span class="keyword">not</span> <span class="literal">null</span> auto_increment <span class="keyword">comment</span> <span class="string">&#x27;主键&#x27;</span>,</span><br><span class="line">    <span class="keyword">name</span> <span class="built_in">varchar</span>(<span class="number">16</span>) <span class="keyword">comment</span> <span class="string">&#x27;姓名&#x27;</span>,</span><br><span class="line">    phone <span class="built_in">varchar</span>(<span class="number">16</span>) <span class="keyword">comment</span> <span class="string">&#x27;手机型号&#x27;</span>,</span><br><span class="line">    buy_time datetime <span class="keyword">comment</span> <span class="string">&#x27;购买日期&#x27;</span>,</span><br><span class="line">    primary <span class="keyword">key</span>(<span class="keyword">id</span>)</span><br><span class="line">);</span><br><span class="line"></span><br><span class="line"><span class="keyword">insert</span> <span class="keyword">into</span> user_phone (<span class="keyword">name</span>, phone, buy_time) <span class="keyword">values</span> (<span class="string">&quot;吴文伦&quot;</span>, <span class="string">&quot;天语&quot;</span>, <span class="string">&quot;2006-07-12&quot;</span>), (<span class="string">&quot;吴文伦&quot;</span>, <span class="string">&quot;诺基亚&quot;</span>, <span class="string">&quot;2011-08-23&quot;</span>), (<span class="string">&quot;吴文伦&quot;</span>, <span class="string">&quot;中兴&quot;</span>, <span class="string">&quot;2015-04-08&quot;</span>), (<span class="string">&quot;吴文伦&quot;</span>, <span class="string">&quot;魅族&quot;</span>, <span class="string">&quot;2017-12-02&quot;</span>), (<span class="string">&quot;吴文伦&quot;</span>, <span class="string">&quot;红米&quot;</span>, <span class="string">&quot;2020-05-15&quot;</span>);</span><br><span class="line"><span class="keyword">insert</span> <span class="keyword">into</span> user_phone (<span class="keyword">name</span>, phone, buy_time) <span class="keyword">values</span> (<span class="string">&quot;勒布朗&quot;</span>, <span class="string">&quot;大哥大&quot;</span>, <span class="string">&quot;1995-09-16&quot;</span>), (<span class="string">&quot;勒布朗&quot;</span>, <span class="string">&quot;诺基亚&quot;</span>, <span class="string">&quot;2001-03-22&quot;</span>), (<span class="string">&quot;勒布朗&quot;</span>, <span class="string">&quot;苹果1代&quot;</span>, <span class="string">&quot;2007-06-08&quot;</span>), (<span class="string">&quot;勒布朗&quot;</span>, <span class="string">&quot;苹果5代&quot;</span>, <span class="string">&quot;2013-11-09&quot;</span>);</span><br><span class="line"><span class="keyword">insert</span> <span class="keyword">into</span> user_phone (<span class="keyword">name</span>, phone, buy_time) <span class="keyword">values</span> (<span class="string">&quot;老于&quot;</span>, <span class="string">&quot;土砖&quot;</span>, <span class="string">&quot;1994-01-01&quot;</span>), (<span class="string">&quot;老于&quot;</span>, <span class="string">&quot;华为&quot;</span>, <span class="string">&quot;2003-08-09&quot;</span>), (<span class="string">&quot;老于&quot;</span>, <span class="string">&quot;vivo&quot;</span>, <span class="string">&quot;2009-07-08&quot;</span>);</span><br></pre></td></tr></table></figure>
 
-<p>数据模型还是对象模型：</p>
-<p>Python 文档里总是用“Python 数据模型”这种说法，而大多数作者提到这个概念的时候会说“Python 对象模型”。Alex Martelli 的《Python技术手册（第 2 版）》和 David Beazley 的《Python 参考手册（第 4版）》是这个领域中最好的两本书，但是他们也总说“Python 对象模型”。维基百科中对象模型的第一个定义（<a href="http://en.wikipedia.org/wiki/Object_model">http://en.wikipedia.org/wiki/Object_model</a>）是：计算机编程语言中对象的属性。这正好是“Python 数据模型”所要描述的概念。我在本书中一直都会用“数据模型”这个词，首先是因为在 Python 文档里对这个词有偏爱，另外一个原因是 Python 语言参考手册中与这里讨论的内容最相关的一章的标题就是“数据模型”（<a href="https://docs.python.org/3/reference/datamodel.html">https://docs.python.org/3/reference/datamodel.html</a>）。</p>
-<p>魔术方法：</p>
-<p>在 Ruby 中也有类似“特殊方法”的概念，但是 Ruby 社区称之为“魔术方法”，而实际上 Python 社区里也有不少人用的是后者。而我恰恰认为“特殊方法”是“魔术方法”的对立面。Python 和 Ruby 都利用了这个概念来提供丰富的元对象协议，这不是魔术，而是让语言的用户和核心开发者拥有并使用同样的工具。考虑一下 JavaScript，情况就正好反过来了。JavaScript 中的对象有不透明的魔术般的特性，而你无法在自定义的对象中模拟这些行为。比如在 JavaScript 1.8.5 中，用户的自定义对象不能有只读属性，然而不少 JavaScript 的内置对象却可以有。因此在 JavaScript中，只读属性是“魔术”般的存在，对于普通的 JavaScript 用户而言，它就像超能力一样。2009 年推出的 ECMAScript 5.1 才让用户可以定义只读属性。JavaScript 中跟元对象协议有关的部分一直在进化，但由于历史原因，这方面它还是赶不上 Python 和 Ruby。</p>
-<p>元对象：</p>
-<p><code>The Art of the Metaobject Protocal （AMOP）</code>是我最喜欢的计算机图书的标题。客观来说，元对象协议这个词对我们学习Python 数据模型是有帮助的。元对象所指的是那些对建构语言本身来讲很重要的对象，以此为前提，协议也可以看作接口。也就是说，元对象协议是对象模型的同义词，它们的意思都是构建核心语言的 API。一套丰富的元对象协议能让我们对语言进行扩展，让它支持新的编程范式。AMOP 的第一作者 Gregor Kiczales 后来成为面向方面编程的先驱，他写出了一个 Java 扩展叫 AspectJ，用来实现他对面向方面编程的理念。其实在 Python 这样的动态语言里，更容易实现面向方面编程。现在已经有几个 Python 框架在做这件事情了，其中最重要的是 <code>zope.interface</code>（<a href="http://docs.zope.org/zope.interface/">http://docs.zope.org/zope.interface/</a>）。第11 章的延伸阅读里会谈到它。</p>
+<p>数据列表如下：</p>
+<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201127172045.png"></p>
+<p>如何操作才能找到符合业务要求的数据呢？正确数据如下：</p>
+<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201127174105.png"></p>
+<h5 id="分组原理"><a href="#分组原理" class="headerlink" title="分组原理"></a>分组原理</h5><p>表里面有三个人，故应想到对<code>name</code>进行分组，分组后能够得到<font color=red><strong>子数据列表项</strong></font>，然后根据聚合函数<code>max</code>在<font color=red><strong>子数据列表项</strong></font>中找到<code>buy_time</code>这一列中最大的日期的那一个值。聚合函数的作用就是在一堆列表数据里的指定列进行聚合运算合成一个值，注意它只针对字段列。<img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201208200558.png"></p>
+<p>执行该SQL语句会得到如下数据</p>
+<figure class="highlight sql"><table><tr><td class="code"><pre><span class="line"><span class="keyword">select</span> <span class="keyword">name</span>, <span class="keyword">max</span>(buy_time) <span class="keyword">as</span> buy_time <span class="keyword">from</span> user_phone <span class="keyword">group</span> <span class="keyword">by</span> <span class="keyword">name</span>;</span><br></pre></td></tr></table></figure>
+
+<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201209195825.png"></p>
+<p>但是少了id和phone两个字段，很多人可能会想到这样子做：</p>
+<figure class="highlight sql"><table><tr><td class="code"><pre><span class="line"><span class="keyword">select</span> <span class="keyword">id</span>, <span class="keyword">name</span>, phone, <span class="keyword">max</span>(buy_time) <span class="keyword">as</span> buy_time <span class="keyword">from</span> user_phone <span class="keyword">group</span> <span class="keyword">by</span> <span class="keyword">name</span>;</span><br></pre></td></tr></table></figure>
+
+<p>那我们执行以下，结果报错了！！</p>
+<figure class="highlight plain"><table><tr><td class="code"><pre><span class="line">ERROR 1055 (42000): Expression #1 of SELECT list is not in GROUP BY clause and contains nonaggregated column &#39;wuwenlun.user_phone.id&#39; which is not functionally dependent on columns in GROUP BY clause; this is incompatible with sql_mode&#x3D;only_full_group_by</span><br></pre></td></tr></table></figure>
+
+<h5 id="修改sql-mode"><a href="#修改sql-mode" class="headerlink" title="修改sql-mode"></a>修改<code>sql-mode</code></h5><p>意思是说<code>sql_mode</code>为<code>only_full_group_by</code>，字段中只允许展示分组的那些字段，在本例中即为<code>name</code>，<code>id</code>和<code>phone</code>不允许展示。如果需要展示，就需要改<code>sql_mode</code>，把<code>only_full_group_by</code>去掉。下面的语句中已经没有<code>only_full_group_by</code>了，执行它。</p>
+<figure class="highlight sql"><table><tr><td class="code"><pre><span class="line"><span class="keyword">set</span> @@session.sql_mode = <span class="string">&#x27;STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION&#x27;</span></span><br></pre></td></tr></table></figure>
+
+<p>再执行查询语句，看看结果：</p>
+<figure class="highlight sql"><table><tr><td class="code"><pre><span class="line"><span class="keyword">select</span> <span class="keyword">id</span>, <span class="keyword">name</span>, phone, <span class="keyword">max</span>(buy_time) <span class="keyword">as</span> buy_time <span class="keyword">from</span> user_phone <span class="keyword">group</span> <span class="keyword">by</span> <span class="keyword">name</span>;</span><br></pre></td></tr></table></figure>
+
+<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201209201457.png"></p>
+<p>虽然可以执行了，但/并不是我们想要的结果（所有用户最近购买手机的记录），为什么名字为<code>吴文伦</code>的这条记录id为1？就得通过分组的运行机理去分析。根据name分组后找到<code>吴文伦</code>的第一条记录，它是根据记录在表中顺序找到第一个得到的。所以id为<code>1</code>，phone为<code>天语</code>是这样子得到的。</p>
+<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201209202925.png"></p>
+<p>所以，明白机理后，要得到正确答案就很容易了，先倒排序再分组就可以了，这样子最近的记录会排在最前面。</p>
+<figure class="highlight sql"><table><tr><td class="code"><pre><span class="line"><span class="keyword">select</span> t.* <span class="keyword">from</span> (<span class="keyword">select</span> * <span class="keyword">from</span> user_phone <span class="keyword">order</span> <span class="keyword">by</span> buy_time <span class="keyword">desc</span>) <span class="keyword">as</span> t <span class="keyword">group</span> <span class="keyword">by</span> t.name;</span><br></pre></td></tr></table></figure>
+
+<p>卧槽，咋还是不对呢？没有起到任何效果！这是因为外层查询是group by，mysql会把子查询里的order by当做无效处理了，对group by来说它只关注结果集，跟你排不排序没有关系，所以在sql优化过程中就把子查询排序省略了，毕竟排序是会耗时间和资源的。</p>
+<h5 id="group-by导致排序失效"><a href="#group-by导致排序失效" class="headerlink" title="group by导致排序失效"></a><code>group by</code>导致排序失效</h5><p>那如何让分组group by情况下分组不失效呢？全网几乎一致的说后面补上limit去影响结果集，语句如下：</p>
+<figure class="highlight sql"><table><tr><td class="code"><pre><span class="line"><span class="keyword">select</span> t.* <span class="keyword">from</span> (<span class="keyword">select</span> * <span class="keyword">from</span> user_phone <span class="keyword">order</span> <span class="keyword">by</span> buy_time <span class="keyword">desc</span> <span class="keyword">limit</span> <span class="number">9999999</span>) <span class="keyword">as</span> t <span class="keyword">group</span> <span class="keyword">by</span> t.name;</span><br></pre></td></tr></table></figure>
+
+<p>可以得到正确输出：</p>
+<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201212140226.png"></p>
+<p>但是我总觉得这种操作有点变态，我想着换一种方法，就是先分组得到用户名和该用户最近购买手机的日期这两个值，以此为查询条件再回表查询。语句如下：</p>
+<figure class="highlight sql"><table><tr><td class="code"><pre><span class="line"><span class="keyword">select</span> t.* <span class="keyword">from</span> user_phone t <span class="keyword">where</span> (t.name, t.buy_time) <span class="keyword">in</span> (<span class="keyword">select</span> <span class="keyword">name</span>, <span class="keyword">max</span>(buy_time) <span class="keyword">as</span> buy_time <span class="keyword">from</span> user_phone <span class="keyword">group</span> <span class="keyword">by</span> <span class="keyword">name</span>);</span><br></pre></td></tr></table></figure>
+
+<p>依然能够得到正确答案：</p>
+<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201127174105.png"></p>
 ]]></content>
       <categories>
-        <category>流畅的Python</category>
-        <category>第一章 Python的数据模型</category>
+        <category>MySQL</category>
+        <category>SQL</category>
       </categories>
       <tags>
-        <tag>学习笔记</tag>
+        <tag>MySQL</tag>
+        <tag>SQL</tag>
       </tags>
   </entry>
   <entry>
@@ -444,27 +412,6 @@
 <p>默认情况下，我们自己定义的类的实例总被认为是真的，除非这个类对<code>__bool__</code>或者<code>__len__</code>函数有自己的实现。<code>bool(x) </code>的背后是调用<code>x.__bool__()</code>的结果；如果不存在<code>__bool__</code>方法，那么<code>bool(x)</code>会尝试调用<code>x.__len__()</code>。若返回<code>0</code>，则<code>bool</code>会返回<code>False</code>；否则返回<code>True</code>。</p>
 <p>我们对<code>Vector</code>类中的<code>__bool__</code>的实现很简单，如果一个向量的模是<code>0</code>，那么就返回<code>False</code>，其他情况则返回<code>True</code>。因为<code>__bool__</code>函数的返回类型应该是布尔型，所以我们通过<code>bool(abs(self))</code>把模值变成了布尔值。</p>
 <p>在<code>Python</code>标准库的文档中，有一节叫作“Built-in Types”（<a href="https://docs.python.org/3/library/stdtypes.html#truth">https://docs.python.org/3/library/stdtypes.html#truth</a>），其中规定了真值检验的标准。通过实现<code>__bool__</code>，你定义的对象就可以与这个标准保持一致。</p>
-]]></content>
-      <categories>
-        <category>流畅的Python</category>
-        <category>第一章 Python的数据模型</category>
-      </categories>
-      <tags>
-        <tag>学习笔记</tag>
-      </tags>
-  </entry>
-  <entry>
-    <title>流畅的Python学习笔记-01数据模型-1-4</title>
-    <url>/2020/10/28/%E6%B5%81%E7%95%85%E7%9A%84Python%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0-01%E6%95%B0%E6%8D%AE%E6%A8%A1%E5%9E%8B-1-4/</url>
-    <content><![CDATA[<link rel="stylesheet" class="aplayer-secondary-style-marker" href="\assets\css\APlayer.min.css"><script src="\assets\js\APlayer.min.js" class="aplayer-secondary-script-marker"></script><script class="meting-secondary-script-marker" src="\assets\js\Meting.min.js"></script><p>第一章第四节：为什么<code>len()</code>不是普通方法</p>
-<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201028144038.png"></p>
-<a id="more"></a>
-
-<h3 id="为什么len-不是普通方法"><a href="#为什么len-不是普通方法" class="headerlink" title="为什么len()不是普通方法"></a>为什么<code>len()</code>不是普通方法</h3><p>我在 2013 年问核心开发者 Raymond Hettinger 这个问题时，他用“<code>Python</code>之禅”（<a href="https://www.python.org/doc/humor/#the-zen-of-python">https://www.python.org/doc/humor/#the-zen-of-python</a>）里的原话回答了我：“实用胜于纯粹。”在 1.2 节里我提到过，如果 x 是一个<a href="https://docs.python.org/zh-cn/3/library/stdtypes.html">内置类型</a>的实例，那么 <code>len(x)</code> 的速度会非常快。背后的原因是 CPython 会直接从一个 C 结构体里读取对象的长度，完全不会调用任何方法。获取一个集合中元素的数量是一个很常见的操作，在<code>str</code>、<code>list</code>、<code>memoryview</code> 等类型上，这个操作必须高效。</p>
-<!-- more -->
-
-<p>换句话说，len 之所以不是一个普通方法，是为了让 Python 自带的数据结构可以走后门，abs 也是同理。但是多亏了它是特殊方法，我们也可以把 len 用于自定义数据类型。这种处理方式在保持内置类型的效率和保证语言的一致性之间找到了一个平衡点，也印证了“Python 之禅”中的另外一句话：“不能让特例特殊到开始破坏既定规则。”</p>
-<p>如果把 abs 和 len 都看作一元运算符的话，你也许更能接受它们——虽然看起来像面向对象语言中的函数，但实际上又不是函数。有一门叫作 ABC 的语言是 Python 的直系祖先，它内置了一个# 运算符，当你写出 #s 的时候，它的作用跟 len 一样。如果写成x#s 这样的中缀运算符的话，那么它的作用是计算 s 中 x 出现的次数。在 Python 里对应的写法是 s.count(x)。注意这里的 s 是一个序列类型。</p>
 ]]></content>
       <categories>
         <category>流畅的Python</category>
@@ -585,6 +532,58 @@
       </tags>
   </entry>
   <entry>
+    <title>流畅的Python学习笔记-01数据模型-1-4</title>
+    <url>/2020/10/28/%E6%B5%81%E7%95%85%E7%9A%84Python%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0-01%E6%95%B0%E6%8D%AE%E6%A8%A1%E5%9E%8B-1-4/</url>
+    <content><![CDATA[<link rel="stylesheet" class="aplayer-secondary-style-marker" href="\assets\css\APlayer.min.css"><script src="\assets\js\APlayer.min.js" class="aplayer-secondary-script-marker"></script><script class="meting-secondary-script-marker" src="\assets\js\Meting.min.js"></script><p>第一章第四节：为什么<code>len()</code>不是普通方法</p>
+<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201028144038.png"></p>
+<a id="more"></a>
+
+<h3 id="为什么len-不是普通方法"><a href="#为什么len-不是普通方法" class="headerlink" title="为什么len()不是普通方法"></a>为什么<code>len()</code>不是普通方法</h3><p>我在 2013 年问核心开发者 Raymond Hettinger 这个问题时，他用“<code>Python</code>之禅”（<a href="https://www.python.org/doc/humor/#the-zen-of-python">https://www.python.org/doc/humor/#the-zen-of-python</a>）里的原话回答了我：“实用胜于纯粹。”在 1.2 节里我提到过，如果 x 是一个<a href="https://docs.python.org/zh-cn/3/library/stdtypes.html">内置类型</a>的实例，那么 <code>len(x)</code> 的速度会非常快。背后的原因是 CPython 会直接从一个 C 结构体里读取对象的长度，完全不会调用任何方法。获取一个集合中元素的数量是一个很常见的操作，在<code>str</code>、<code>list</code>、<code>memoryview</code> 等类型上，这个操作必须高效。</p>
+<!-- more -->
+
+<p>换句话说，len 之所以不是一个普通方法，是为了让 Python 自带的数据结构可以走后门，abs 也是同理。但是多亏了它是特殊方法，我们也可以把 len 用于自定义数据类型。这种处理方式在保持内置类型的效率和保证语言的一致性之间找到了一个平衡点，也印证了“Python 之禅”中的另外一句话：“不能让特例特殊到开始破坏既定规则。”</p>
+<p>如果把 abs 和 len 都看作一元运算符的话，你也许更能接受它们——虽然看起来像面向对象语言中的函数，但实际上又不是函数。有一门叫作 ABC 的语言是 Python 的直系祖先，它内置了一个# 运算符，当你写出 #s 的时候，它的作用跟 len 一样。如果写成x#s 这样的中缀运算符的话，那么它的作用是计算 s 中 x 出现的次数。在 Python 里对应的写法是 s.count(x)。注意这里的 s 是一个序列类型。</p>
+]]></content>
+      <categories>
+        <category>流畅的Python</category>
+        <category>第一章 Python的数据模型</category>
+      </categories>
+      <tags>
+        <tag>学习笔记</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title>流畅的Python学习笔记-01数据模型-1-5</title>
+    <url>/2020/10/28/%E6%B5%81%E7%95%85%E7%9A%84Python%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0-01%E6%95%B0%E6%8D%AE%E6%A8%A1%E5%9E%8B-1-5/</url>
+    <content><![CDATA[<link rel="stylesheet" class="aplayer-secondary-style-marker" href="\assets\css\APlayer.min.css"><script src="\assets\js\APlayer.min.js" class="aplayer-secondary-script-marker"></script><script class="meting-secondary-script-marker" src="\assets\js\Meting.min.js"></script><p>第一章第五节：本章小结以及延申阅读</p>
+<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201028144038.png"></p>
+<a id="more"></a>
+
+<h3 id="本章小结"><a href="#本章小结" class="headerlink" title="本章小结"></a>本章小结</h3><p>通过实现特殊方法，自定义数据类型可以表现得跟内置类型一样，从而让我们写出更具表达力的代码——或者说，更具 Python 风格的代码。</p>
+<p>Python 对象的一个基本要求就是它得有合理的字符串表示形式，我们可以通过 <code>__repr__</code> 和 <code>__str__</code> 来满足这个要求。前者方便我们调试和记录日志，后者则是给终端用户看的。这就是数据模型中存在特殊方法 <code>__repr__</code> 和 <code>__str__</code> 的原因。</p>
+<p>对序列数据类型的模拟是特殊方法用得最多的地方，这一点在FrenchDeck 类的示例中有所展现。在第 2 章中，我们会着重介绍序列数据类型，然后在第 10 章中，我们会把 Vector 类扩展成一个多维的数据类型，通过这个练习你将有机会实现自定义的序列。</p>
+<p>Python 通过<strong>运算符重载</strong>这一模式提供了丰富的数值类型，除了内置的那些之外，还有 <code>decimal.Decimal</code> 和 <code>fractions.Fraction</code>。这些数据类型都支持中缀算术运算符。在第 13 章中，我们还会通过对 Vector类的扩展来学习如何实现这些运算符，当然还会提到如何让运算符满足交换律和增强赋值。</p>
+<p>Python 数据模型的特殊方法还有很多，本书会涵盖其中的绝大部分，探讨如何使用和实现它们。</p>
+<h3 id="延申阅读"><a href="#延申阅读" class="headerlink" title="延申阅读"></a>延申阅读</h3><p>对本章内容和本书主题来说，Python 语言参考手册里的“Data Model”一章（<a href="https://docs.python.org/3/reference/datamodel.html">https://docs.python.org/3/reference/datamodel.html</a>）是最符合规范的知识来源。</p>
+<p>Alex Martelli 的《Python 技术手册（第 2 版）》对数据模型的讲解很精彩。我写这本书的时候，《Python 技术手册》的最新版本是 2006 年出版的，书里用的还是 Python 2.5，但是 Python 关于数据模型的概念并没有太大的变化，而书中 Martelli 对属性访问机制的描述，应该是除了CPython 中的 C 源码之外在这方面最权威的解释。Martelli 还是 StackOverflow 上的高产贡献者，在他名下差不多有 5000 条答案，你也可以去他的 StackOverflow 主页（<a href="http://stackoverflow.com/users/95810/alex-martelli">http://stackoverflow.com/users/95810/alex-martelli</a>）上看看。</p>
+<center>杂谈</center>
+
+<p>数据模型还是对象模型：</p>
+<p>Python 文档里总是用“Python 数据模型”这种说法，而大多数作者提到这个概念的时候会说“Python 对象模型”。Alex Martelli 的《Python技术手册（第 2 版）》和 David Beazley 的《Python 参考手册（第 4版）》是这个领域中最好的两本书，但是他们也总说“Python 对象模型”。维基百科中对象模型的第一个定义（<a href="http://en.wikipedia.org/wiki/Object_model">http://en.wikipedia.org/wiki/Object_model</a>）是：计算机编程语言中对象的属性。这正好是“Python 数据模型”所要描述的概念。我在本书中一直都会用“数据模型”这个词，首先是因为在 Python 文档里对这个词有偏爱，另外一个原因是 Python 语言参考手册中与这里讨论的内容最相关的一章的标题就是“数据模型”（<a href="https://docs.python.org/3/reference/datamodel.html">https://docs.python.org/3/reference/datamodel.html</a>）。</p>
+<p>魔术方法：</p>
+<p>在 Ruby 中也有类似“特殊方法”的概念，但是 Ruby 社区称之为“魔术方法”，而实际上 Python 社区里也有不少人用的是后者。而我恰恰认为“特殊方法”是“魔术方法”的对立面。Python 和 Ruby 都利用了这个概念来提供丰富的元对象协议，这不是魔术，而是让语言的用户和核心开发者拥有并使用同样的工具。考虑一下 JavaScript，情况就正好反过来了。JavaScript 中的对象有不透明的魔术般的特性，而你无法在自定义的对象中模拟这些行为。比如在 JavaScript 1.8.5 中，用户的自定义对象不能有只读属性，然而不少 JavaScript 的内置对象却可以有。因此在 JavaScript中，只读属性是“魔术”般的存在，对于普通的 JavaScript 用户而言，它就像超能力一样。2009 年推出的 ECMAScript 5.1 才让用户可以定义只读属性。JavaScript 中跟元对象协议有关的部分一直在进化，但由于历史原因，这方面它还是赶不上 Python 和 Ruby。</p>
+<p>元对象：</p>
+<p><code>The Art of the Metaobject Protocal （AMOP）</code>是我最喜欢的计算机图书的标题。客观来说，元对象协议这个词对我们学习Python 数据模型是有帮助的。元对象所指的是那些对建构语言本身来讲很重要的对象，以此为前提，协议也可以看作接口。也就是说，元对象协议是对象模型的同义词，它们的意思都是构建核心语言的 API。一套丰富的元对象协议能让我们对语言进行扩展，让它支持新的编程范式。AMOP 的第一作者 Gregor Kiczales 后来成为面向方面编程的先驱，他写出了一个 Java 扩展叫 AspectJ，用来实现他对面向方面编程的理念。其实在 Python 这样的动态语言里，更容易实现面向方面编程。现在已经有几个 Python 框架在做这件事情了，其中最重要的是 <code>zope.interface</code>（<a href="http://docs.zope.org/zope.interface/">http://docs.zope.org/zope.interface/</a>）。第11 章的延伸阅读里会谈到它。</p>
+]]></content>
+      <categories>
+        <category>流畅的Python</category>
+        <category>第一章 Python的数据模型</category>
+      </categories>
+      <tags>
+        <tag>学习笔记</tag>
+      </tags>
+  </entry>
+  <entry>
     <title>流畅的Python学习笔记-02序列构成的数组-2-1</title>
     <url>/2020/10/29/%E6%B5%81%E7%95%85%E7%9A%84Python%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0-02%E5%BA%8F%E5%88%97%E6%9E%84%E6%88%90%E7%9A%84%E6%95%B0%E7%BB%84-2-1/</url>
     <content><![CDATA[<link rel="stylesheet" class="aplayer-secondary-style-marker" href="\assets\css\APlayer.min.css"><script src="\assets\js\APlayer.min.js" class="aplayer-secondary-script-marker"></script><script class="meting-secondary-script-marker" src="\assets\js\Meting.min.js"></script><p>第二章第一节：内置序列类型概览</p>
@@ -627,120 +626,80 @@
       </tags>
   </entry>
   <entry>
-    <title>流畅的Python学习笔记-02序列构成的数组-2-2</title>
-    <url>/2020/10/29/%E6%B5%81%E7%95%85%E7%9A%84Python%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0-02%E5%BA%8F%E5%88%97%E6%9E%84%E6%88%90%E7%9A%84%E6%95%B0%E7%BB%84-2-2/</url>
-    <content><![CDATA[<link rel="stylesheet" class="aplayer-secondary-style-marker" href="\assets\css\APlayer.min.css"><script src="\assets\js\APlayer.min.js" class="aplayer-secondary-script-marker"></script><script class="meting-secondary-script-marker" src="\assets\js\Meting.min.js"></script><p>第二章第一节：列表推导和生成器表达式</p>
-<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201028144038.png"></p>
+    <title>目标主机离线安装Python及pip3</title>
+    <url>/2020/09/24/%E7%9B%AE%E6%A0%87%E4%B8%BB%E6%9C%BA%E7%A6%BB%E7%BA%BF%E5%AE%89%E8%A3%85Python%E5%8F%8Apip3/</url>
+    <content><![CDATA[<link rel="stylesheet" class="aplayer-secondary-style-marker" href="\assets\css\APlayer.min.css"><script src="\assets\js\APlayer.min.js" class="aplayer-secondary-script-marker"></script><script class="meting-secondary-script-marker" src="\assets\js\Meting.min.js"></script><p>将Python项目文件打包到无法联网的主机上部署执行</p>
+<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201028143859.png"></p>
 <a id="more"></a>
 
-<p>列表推导是构建列表（list）的快捷方式，而生成器表达式则可以用来创建其他任何类型的序列。如果你的代码里并不经常使用它们，那么很可能你错过了许多写出可读性更好且更高效的代码的机会。</p>
-<p>如果你对我说的“更具可读性”持怀疑态度的话，别急着下结论，我马上就能说服你。</p>
-<p>很多 Python 程序员都把列表推导（list comprehension）简称为 listcomps，生成式表达器（generator expression）则称为genexps。我有时也会这么用。</p>
-<h3 id="列表推导和可读性"><a href="#列表推导和可读性" class="headerlink" title="列表推导和可读性"></a>列表推导和可读性</h3><p>先来个小测试，你觉得示例 2-1 和示例 2-2 中的代码，哪个更容易读懂？</p>
-<p>示例 2-1 把一个字符串变成 Unicode 码位的列表：</p>
-<figure class="highlight python"><table><tr><td class="code"><pre><span class="line">symbols = <span class="string">&#x27;$¢£¥€¤&#x27;</span></span><br><span class="line">codes = []</span><br><span class="line"><span class="keyword">for</span> symbol <span class="keyword">in</span> symbols:</span><br><span class="line">  codes.append(ord(symbol))</span><br><span class="line">print(codes)</span><br><span class="line"></span><br><span class="line">&gt;&gt;&gt;[<span class="number">36</span>, <span class="number">162</span>, <span class="number">163</span>, <span class="number">165</span>, <span class="number">8364</span>, <span class="number">164</span>]</span><br></pre></td></tr></table></figure>
+<h3 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h3><p>最近遇到了一个场景：需要将Python项目文件打包到无法联网的主机上部署执行，本篇文章记录针对于该场景的处理方案。</p>
+<p>说明：</p>
+<p>源主机（可联网）：安装了Python3和pip3</p>
+<p>目标主机（无法联网）：需安装和源主机相同的Python版本和pip3，部署执行项目文件</p>
+<p>主机系统为centos，Python版本为3.5.2，通过虚拟环境+pip进行迁移</p>
+<h3 id="目标主机离线安装Python及pip3"><a href="#目标主机离线安装Python及pip3" class="headerlink" title="目标主机离线安装Python及pip3"></a>目标主机离线安装Python及pip3</h3><h3 id="源主机中下载所需包"><a href="#源主机中下载所需包" class="headerlink" title="源主机中下载所需包"></a>源主机中下载所需包</h3><p><strong>Python3</strong></p>
+<p>首先，下载Python3，可以在<a href="https://link.zhihu.com/?target=https://www.python.org/downloads/source/">官网</a>或者通过源主机（可联网的其它主机）wget：</p>
+<figure class="highlight text"><table><tr><td class="code"><pre><span class="line">wget --no-check-certificate https://www.python.org/ftp/python/3.5.2/Python-3.5.2.tgz</span><br></pre></td></tr></table></figure>
 
-<p>示例 2-2 把字符串变成 Unicode 码位的另外一种写法：</p>
-<figure class="highlight python"><table><tr><td class="code"><pre><span class="line">symbols = <span class="string">&#x27;$¢£¥€¤&#x27;</span></span><br><span class="line">codes = [ord(symbol) <span class="keyword">for</span> symbol <span class="keyword">in</span> symbols]</span><br><span class="line">print(codes)</span><br><span class="line"></span><br><span class="line">&gt;&gt;&gt;[<span class="number">36</span>, <span class="number">162</span>, <span class="number">163</span>, <span class="number">165</span>, <span class="number">8364</span>, <span class="number">164</span>]</span><br></pre></td></tr></table></figure>
+<p><strong>Python3依赖包</strong></p>
+<p>然后，需要下载Python3的依赖包，可以通过centos镜像中去copy，不过我更推荐用yum生成的方式：</p>
+<figure class="highlight text"><table><tr><td class="code"><pre><span class="line">yum install zlib-devel bzip2-devel openssl-devel ncurses-devel  epel-release gcc gcc-c++ xz-devel readline-devel gdbm-devel sqlite-devel tk-devel db4-devel libpcap-devel libffi-devel --downloadonly --downloaddir=/packages</span><br></pre></td></tr></table></figure>
 
-<p>虽说任何学过一点 Python 的人应该都能看懂示例 2-1，但是我觉得如果学会了列表推导的话，示例 2-2 读起来更方便，因为这段代码的功能从字面上就能轻松地看出来。</p>
-<p>for 循环可以胜任很多任务：遍历一个序列以求得总数或挑出某个特定的元素、用来计算总和或是平均数，还有其他任何你想做的事情。在示例 2-1 的代码里，它被用来新建一个列表。</p>
-<p>另一方面，列表推导也可能被滥用。<font color=red>通常的原则是，只用列表推导来创建新的列表，并且尽量保持简短</font>。如果列表推导的代码超过了两行，你可能就要考虑是不是得用 for 循环重写了。就跟写文章一样，并没有什么硬性的规则，这个度得你自己把握。</p>
-<p>Python 会忽略代码里 []、{} 和 () 中的换行，因此如果你的代码里有多行的列表、列表推导、生成器表达式、字典这一类的，可以省略不太好看的续行符 <code>\</code>。</p>
-<p>列表推导不会再有变量泄漏的问题。</p>
-<p>Python 2.x 中，在列表推导中 for 关键词之后的赋值操作可能会影响列表推导上下文中的同名变量。像下面这个 Python 2.7 控制台对话：</p>
-<figure class="highlight python"><table><tr><td class="code"><pre><span class="line">Python <span class="number">2.7</span><span class="number">.6</span> (default, Mar <span class="number">22</span> <span class="number">2014</span>, <span class="number">22</span>:<span class="number">59</span>:<span class="number">38</span>)</span><br><span class="line">[GCC <span class="number">4.8</span><span class="number">.2</span>] on linux2</span><br><span class="line">Type <span class="string">&quot;help&quot;</span>, <span class="string">&quot;copyright&quot;</span>, <span class="string">&quot;credits&quot;</span> <span class="keyword">or</span> <span class="string">&quot;license&quot;</span> <span class="keyword">for</span> more information.</span><br><span class="line"><span class="meta">&gt;&gt;&gt; </span>x = <span class="string">&#x27;my precious&#x27;</span></span><br><span class="line"><span class="meta">&gt;&gt;&gt; </span>dummy = [x <span class="keyword">for</span> x <span class="keyword">in</span> <span class="string">&#x27;ABC&#x27;</span>]</span><br><span class="line"><span class="meta">&gt;&gt;&gt; </span>x</span><br><span class="line"><span class="string">&#x27;C</span></span><br></pre></td></tr></table></figure>
+<p>命令执行完毕，你就会在/packages目录下发现所需的所有.rpm文件。</p>
+<p>如果，源主机中已经安装了这些依赖，那么你可以用：</p>
+<figure class="highlight text"><table><tr><td class="code"><pre><span class="line">yum reinstall zlib-devel bzip2-devel openssl-devel ncurses-devel  epel-release gcc gcc-c++ xz-devel readline-devel gdbm-devel sqlite-devel tk-devel db4-devel libpcap-devel libffi-devel --downloadonly --downloaddir=/packages</span><br></pre></td></tr></table></figure>
 
-<p>如你所见，x 原本的值被取代了，但是这种情况在 Python 3 中是不会出现的。</p>
-<p>列表推导、生成器表达式，以及同它们很相似的集合（set）推导和字典（dict）推导，在 Python 3 中都有了自己的局部作用域，就像函数似的。表达式内部的变量和赋值只在局部起作用，表达式的上下文里的同名变量还可以被正常引用，局部变量并不会影响到它们。</p>
-<p>这是Python 3 代码：</p>
-<figure class="highlight python"><table><tr><td class="code"><pre><span class="line"><span class="meta">&gt;&gt;&gt; </span>x = <span class="string">&#x27;ABC&#x27;</span></span><br><span class="line"><span class="meta">&gt;&gt;&gt; </span>dummy = [ord(x) <span class="keyword">for</span> x <span class="keyword">in</span> x]</span><br><span class="line"><span class="meta">&gt;&gt;&gt; </span>x ➊</span><br><span class="line"><span class="string">&#x27;ABC&#x27;</span></span><br><span class="line"><span class="meta">&gt;&gt;&gt; </span>dummy ➋</span><br><span class="line">[<span class="number">65</span>, <span class="number">66</span>, <span class="number">67</span>]</span><br><span class="line">&gt;&gt;&gt;</span><br></pre></td></tr></table></figure>
+<p>打包：</p>
+<figure class="highlight text"><table><tr><td class="code"><pre><span class="line">zip -r packages.zip packages/</span><br></pre></td></tr></table></figure>
 
-<p>➊ x 的值被保留了。</p>
-<p>➋ 列表推导也创建了正确的列表。</p>
-<p>列表推导可以帮助我们把一个序列或是其他可迭代类型中的元素过滤或是加工，然后再新建一个列表。Python 内置的 <code>filter</code> 和 <code>map</code> 函数组合起来也能达到这一效果，但是可读性上打了不小的折扣。</p>
-<h3 id="列表推导同filter和map的比较"><a href="#列表推导同filter和map的比较" class="headerlink" title="列表推导同filter和map的比较"></a>列表推导同filter和map的比较</h3><p>filter 和 map 合起来能做的事情，列表推导也可以做，而且还不需要借助难以理解和阅读的 lambda 表达式。详见示例 2-3。</p>
-<p>示例 2-3 用列表推导和 map/filter 组合来创建同样的表单：</p>
-<figure class="highlight python"><table><tr><td class="code"><pre><span class="line"><span class="meta">&gt;&gt;&gt; </span>symbols = <span class="string">&#x27;$¢£¥€¤&#x27;</span></span><br><span class="line"><span class="meta">&gt;&gt;&gt; </span>beyond_ascii = [ord(s) <span class="keyword">for</span> s <span class="keyword">in</span> symbols <span class="keyword">if</span> ord(s) &gt; <span class="number">127</span>]</span><br><span class="line"><span class="meta">&gt;&gt;&gt; </span>beyond_ascii</span><br><span class="line">[<span class="number">162</span>, <span class="number">163</span>, <span class="number">165</span>, <span class="number">8364</span>, <span class="number">164</span>]</span><br><span class="line"><span class="meta">&gt;&gt;&gt; </span>beyond_ascii = list(filter(<span class="keyword">lambda</span> c: c &gt; <span class="number">127</span>, map(ord, symbols)))</span><br><span class="line"><span class="meta">&gt;&gt;&gt; </span>beyond_ascii</span><br><span class="line">[<span class="number">162</span>, <span class="number">163</span>, <span class="number">165</span>, <span class="number">8364</span>, <span class="number">164</span>]</span><br></pre></td></tr></table></figure>
+<h3 id="目标主机中安装"><a href="#目标主机中安装" class="headerlink" title="目标主机中安装"></a>目标主机中安装</h3><p>将Python-3.5.2.tgz和packages.zip上传至目标主机。</p>
+<p>首先，安装Python3依赖：</p>
+<figure class="highlight text"><table><tr><td class="code"><pre><span class="line">unzip packages.zip</span><br><span class="line">cd packages/</span><br><span class="line">rpm -Uvh  *.rpm --nodeps --force</span><br></pre></td></tr></table></figure>
 
-<p>我原以为 map/filter 组合起来用要比列表推导快一些，Alex Martelli却说不一定——至少在上面这个例子中不一定。在本书的代码仓库（<a href="https://github.com/fluentpython/example-code">https://github.com/fluentpython/example-code</a>）中有名为02-array-seq/listcomp_speed.py（<a href="https://github.com/fluentpython/example-code/blob/master/02-array-seq/listcomp_speed.py">https://github.com/fluentpython/example-code/blob/master/02-array-seq/listcomp_speed.py</a>）的脚本，代码中有这两个方法的效率的比较。</p>
-<p>第 5 章会更详细地讨论 map 和 filter。下面就来看看如何用列表推导来计算笛卡儿积：两个或以上的列表中的元素对构成元组，这些元组构成的列表就是笛卡儿积。</p>
-<h3 id="笛卡尔积"><a href="#笛卡尔积" class="headerlink" title="笛卡尔积"></a>笛卡尔积</h3><p>如前所述，用列表推导可以生成两个或以上的可迭代类型的笛卡儿积。笛卡儿积是一个列表，列表里的元素是由输入的可迭代类型的元素对构成的元组，因此笛卡儿积列表的长度等于输入变量的长度的乘积，如下图所示：</p>
-<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201029144759.png"></p>
-<p>上图含有 4 种花色和 3 种牌面的列表的笛卡儿积，结果是一个包含 12 个元素的列表。</p>
-<p>如果你需要一个列表，列表里是 3 种不同尺寸的 T 恤衫，每个尺寸都有2 个颜色，示例 2-4 用列表推导算出了这个列表，列表里有 6 种组合。</p>
-<p>示例 2-4 使用列表推导计算笛卡儿积：</p>
-<figure class="highlight python"><table><tr><td class="code"><pre><span class="line"><span class="meta">&gt;&gt;&gt; </span>colors = [<span class="string">&#x27;black&#x27;</span>, <span class="string">&#x27;white&#x27;</span>]</span><br><span class="line"><span class="meta">&gt;&gt;&gt; </span>sizes = [<span class="string">&#x27;S&#x27;</span>, <span class="string">&#x27;M&#x27;</span>, <span class="string">&#x27;L&#x27;</span>]</span><br><span class="line"><span class="meta">&gt;&gt;&gt; </span>tshirts = [(color, size) <span class="keyword">for</span> color <span class="keyword">in</span> colors <span class="keyword">for</span> size <span class="keyword">in</span> sizes] ➊</span><br><span class="line"><span class="meta">&gt;&gt;&gt; </span>tshirts</span><br><span class="line">[(<span class="string">&#x27;black&#x27;</span>, <span class="string">&#x27;S&#x27;</span>), (<span class="string">&#x27;black&#x27;</span>, <span class="string">&#x27;M&#x27;</span>), (<span class="string">&#x27;black&#x27;</span>, <span class="string">&#x27;L&#x27;</span>), (<span class="string">&#x27;white&#x27;</span>, <span class="string">&#x27;S&#x27;</span>),</span><br><span class="line">(<span class="string">&#x27;white&#x27;</span>, <span class="string">&#x27;M&#x27;</span>), (<span class="string">&#x27;white&#x27;</span>, <span class="string">&#x27;L&#x27;</span>)]</span><br><span class="line"><span class="meta">&gt;&gt;&gt; </span><span class="keyword">for</span> color <span class="keyword">in</span> colors: ➋</span><br><span class="line"><span class="meta">... </span><span class="keyword">for</span> size <span class="keyword">in</span> sizes:</span><br><span class="line"><span class="meta">... </span>print((color, size))</span><br><span class="line">...</span><br><span class="line">(<span class="string">&#x27;black&#x27;</span>, <span class="string">&#x27;S&#x27;</span>)</span><br><span class="line">(<span class="string">&#x27;black&#x27;</span>, <span class="string">&#x27;M&#x27;</span>)</span><br><span class="line">(<span class="string">&#x27;black&#x27;</span>, <span class="string">&#x27;L&#x27;</span>)</span><br><span class="line">(<span class="string">&#x27;white&#x27;</span>, <span class="string">&#x27;S&#x27;</span>)</span><br><span class="line">(<span class="string">&#x27;white&#x27;</span>, <span class="string">&#x27;M&#x27;</span>)</span><br><span class="line">(<span class="string">&#x27;white&#x27;</span>, <span class="string">&#x27;L&#x27;</span>)</span><br><span class="line"><span class="meta">&gt;&gt;&gt; </span>tshirts = [(color, size) <span class="keyword">for</span> size <span class="keyword">in</span> sizes ➌</span><br><span class="line"><span class="meta">... </span><span class="keyword">for</span> color <span class="keyword">in</span> colors]</span><br><span class="line"><span class="meta">&gt;&gt;&gt; </span>tshirts</span><br><span class="line">[(<span class="string">&#x27;black&#x27;</span>, <span class="string">&#x27;S&#x27;</span>), (<span class="string">&#x27;white&#x27;</span>, <span class="string">&#x27;S&#x27;</span>), (<span class="string">&#x27;black&#x27;</span>, <span class="string">&#x27;M&#x27;</span>), (<span class="string">&#x27;white&#x27;</span>, <span class="string">&#x27;M&#x27;</span>),</span><br><span class="line">(<span class="string">&#x27;black&#x27;</span>, <span class="string">&#x27;L&#x27;</span>), (<span class="string">&#x27;white&#x27;</span>, <span class="string">&#x27;L&#x27;</span>)]</span><br></pre></td></tr></table></figure>
+<p>然后，安装Python3：</p>
+<figure class="highlight text"><table><tr><td class="code"><pre><span class="line">tar -zxvf Python-3.5.2.tgz</span><br><span class="line"></span><br><span class="line">mkdir /usr/local/python3</span><br><span class="line">cd Python-3.5.2 </span><br><span class="line">./configure --prefix=/usr/local/python3                    # 将Python3安装在/usr/local/python3</span><br><span class="line">make &amp;&amp; make install                                       # 编译安装</span><br><span class="line"></span><br><span class="line">ln -s /usr/local/python3/bin/python3 /usr/bin/python3      # 创建python3软链接</span><br><span class="line">ln -s /usr/local/python3/bin/pip3 /usr/bin/pip3            # 创建pip3软链接</span><br></pre></td></tr></table></figure>
 
-<p>➊ 这里得到的结果是先以颜色排列，再以尺码排列。</p>
-<p>➋ 注意，这里两个循环的嵌套关系和上面列表推导中 for 从句的先后顺序一样。</p>
-<p>➌ 如果想依照先尺码后颜色的顺序来排列，只需要调整从句的顺序。我在这里插入了一个换行符，这样顺序安排就更明显了。</p>
-<p><font color=red><strong>列表推导的作用只有一个：生成列表（list）。如果想生成其他类型的序列，生成器表达式就派上了用场。下一节就是对生成器表达式的一个简单介绍，其中可以看到如何用它生成列表以外的序列类型。</strong></font></p>
-<h3 id="生成器表达式"><a href="#生成器表达式" class="headerlink" title="生成器表达式"></a>生成器表达式</h3><p>虽然也可以用列表推导来初始化元组、数组或其他序列类型，但是生成器表达式是更好的选择。<strong>这是因为生成器表达式背后遵守了迭代器协议，可以逐个地产出元素，而不是先建立一个完整的列表，然后再把这个列表传递到某个构造函数里</strong>。前面那种方式显然能够节省内存。</p>
-<p>生成器表达式的语法跟列表推导差不多，只不过把方括号换成圆括号而已。</p>
-<p>示例 2-5 用生成器表达式初始化元组和数组：</p>
-<figure class="highlight python"><table><tr><td class="code"><pre><span class="line"><span class="meta">&gt;&gt;&gt; </span>symbols = <span class="string">&#x27;$¢£¥€¤&#x27;</span></span><br><span class="line"><span class="meta">&gt;&gt;&gt; </span>tuple(ord(symbol) <span class="keyword">for</span> symbol <span class="keyword">in</span> symbols) ➊</span><br><span class="line">(<span class="number">36</span>, <span class="number">162</span>, <span class="number">163</span>, <span class="number">165</span>, <span class="number">8364</span>, <span class="number">164</span>)</span><br><span class="line"><span class="meta">&gt;&gt;&gt; </span><span class="keyword">import</span> array</span><br><span class="line"><span class="meta">&gt;&gt;&gt; </span>array.array(<span class="string">&#x27;I&#x27;</span>, (ord(symbol) <span class="keyword">for</span> symbol <span class="keyword">in</span> symbols)) ➋</span><br><span class="line">array(<span class="string">&#x27;I&#x27;</span>, [<span class="number">36</span>, <span class="number">162</span>, <span class="number">163</span>, <span class="number">165</span>, <span class="number">8364</span>, <span class="number">164</span>])</span><br></pre></td></tr></table></figure>
+<p>安装完毕，可通过：</p>
+<figure class="highlight text"><table><tr><td class="code"><pre><span class="line">Python3 -V</span><br><span class="line">pip3 -V</span><br></pre></td></tr></table></figure>
 
-<p>➊ 如果生成器表达式是一个函数调用过程中的唯一参数，那么不需要额外再用括号把它围起来。</p>
-<p>➋ array 的构造方法需要两个参数，因此括号是必需的。array 构造方法的第一个参数指定了数组中数字的存储方式。2.9.1 节中有更多关于数组的详细讨论。</p>
-<p>示例 2-6 则是利用生成器表达式实现了一个笛卡儿积，用以打印出上文中我们提到过的 T 恤衫的 2 种颜色和 3 种尺码的所有组合。与示例 2-4不同的是，用到生成器表达式之后，内存里不会留下一个有 6 个组合的列表，因为生成器表达式会在每次 for 循环运行时才生成一个组合。如果要计算两个各有 1000 个元素的列表的笛卡儿积，生成器表达式就可以帮忙省掉运行 for 循环的开销，即一个含有 100 万个元素的列表。</p>
-<p>示例 2-6 使用生成器表达式计算笛卡儿积：</p>
-<figure class="highlight python"><table><tr><td class="code"><pre><span class="line"><span class="meta">&gt;&gt;&gt; </span>colors = [<span class="string">&#x27;black&#x27;</span>, <span class="string">&#x27;white&#x27;</span>]</span><br><span class="line"><span class="meta">&gt;&gt;&gt; </span>sizes = [<span class="string">&#x27;S&#x27;</span>, <span class="string">&#x27;M&#x27;</span>, <span class="string">&#x27;L&#x27;</span>]</span><br><span class="line"><span class="meta">&gt;&gt;&gt; </span><span class="keyword">for</span> tshirt <span class="keyword">in</span> (<span class="string">&#x27;%s %s&#x27;</span> % (c, s) <span class="keyword">for</span> c <span class="keyword">in</span> colors <span class="keyword">for</span> s <span class="keyword">in</span> sizes): ➊</span><br><span class="line"><span class="meta">... </span>print(tshirt)</span><br><span class="line">...</span><br><span class="line">black S</span><br><span class="line">black M</span><br><span class="line">black L</span><br><span class="line">white S</span><br><span class="line">white M</span><br><span class="line">white L</span><br></pre></td></tr></table></figure>
+<p>查看并检查安装的版本</p>
+<h3 id="源主机中打包项目文件"><a href="#源主机中打包项目文件" class="headerlink" title="源主机中打包项目文件"></a>源主机中打包项目文件</h3><p>若项目中创建虚拟环境，首先激活虚环境，然后进入项目文件，执行：</p>
+<figure class="highlight text"><table><tr><td class="code"><pre><span class="line">pip3 freeze &gt; requirements.txt</span><br></pre></td></tr></table></figure>
 
-<p>➊ 生成器表达式逐个产出元素，从来不会一次性产出一个含有 6 个 T恤样式的列表。</p>
-<p>第 14 章会专门讲到生成器的工作原理。这里只是简单看看如何用生成器来初始化除列表之外的序列，以及如何用它来避免额外的内存占用。</p>
-<h3 id="如何理解可迭代对象、迭代器和生成器"><a href="#如何理解可迭代对象、迭代器和生成器" class="headerlink" title="如何理解可迭代对象、迭代器和生成器"></a>如何理解可迭代对象、迭代器和生成器</h3><p>在讨论可迭代对象、迭代器和生成器之前，先说明一下<strong>迭代器模式（iterator pattern）</strong>，维基百科这么解释：</p>
-<blockquote>
-<p>迭代器是一种最简单也最常见的设计模式。它可以让用户透过特定的接口巡访容器中的每一个元素而不用了解底层的实现。</p>
-</blockquote>
-<p>迭代是数据处理的基石。当内存中放不下数据集时，我们要找到一种<strong>惰性</strong>获取数据的方式，即按需一次获取一个数据项，这就是迭代器模式。</p>
-<p>我们都知道序列是可迭代的。当解释器需要迭代对象x时，会自动调用iter(x)函数时。内置的iter函数有以下作用：</p>
-<ul>
-<li>检查对象是否实现了<code>__iter__</code>方法，如果实现了就调用它，获得一个迭代器。</li>
-<li>如果没有实现<code>__iter__</code>方法，但是实现了<code>__getitem__</code>方法，python会创建一个迭代器，尝试按顺序（从索引0开始）获取元素。</li>
-<li>如果尝试失败，python会抛出<code>TypeError</code>异常，通常会提示”C object is not iterable”，其中C是目标对象所属的类。</li>
+<p>将当前项目中的库列表生成并保存在requirements.txt中。</p>
+<p>然后，通过pip生成批量离线安装包（whl文件）：</p>
+<figure class="highlight text"><table><tr><td class="code"><pre><span class="line">pip wheel --wheel-dir=./tmp/packages -r requirements.txt</span><br></pre></td></tr></table></figure>
+
+<p>执行完毕之后，你会发现/tmp/packages中包含了项目所需的所有.whl</p>
+<p>打包项目文件：</p>
+<figure class="highlight text"><table><tr><td class="code"><pre><span class="line">zip A.zip A/</span><br></pre></td></tr></table></figure>
+
+<h3 id="目标主机中部署"><a href="#目标主机中部署" class="headerlink" title="目标主机中部署"></a>目标主机中部署</h3><p>上传A.zip至目标主机，创建虚环境，并激活（python3 自带了venv）：</p>
+<figure class="highlight text"><table><tr><td class="code"><pre><span class="line">python3 -m venv test_venv</span><br><span class="line">cd test_venv</span><br><span class="line">source bin/activate</span><br></pre></td></tr></table></figure>
+
+<p>解压项目代码A.zip，并切换：</p>
+<figure class="highlight text"><table><tr><td class="code"><pre><span class="line">unzip A.zip</span><br><span class="line">cd A/</span><br></pre></td></tr></table></figure>
+
+<p>安装项目Python依赖模块：</p>
+<figure class="highlight text"><table><tr><td class="code"><pre><span class="line">pip3 install --no-index --find-links=tmp/packages -r requirements</span><br></pre></td></tr></table></figure>
+
+<p>安装完毕，检查：</p>
+<figure class="highlight text"><table><tr><td class="code"><pre><span class="line">pip3 freeze</span><br></pre></td></tr></table></figure>
+
+<p>当然你也可以通过python命令行import进行检验哈哈。</p>
+<p>最后，执行项目启动脚本（startup.sh）部署：</p>
+<figure class="highlight text"><table><tr><td class="code"><pre><span class="line">chmod +x  ./startup.sh</span><br><span class="line">nohup ./startup.sh &gt; a-log 2&gt;&amp;1 &amp;</span><br></pre></td></tr></table></figure>
+
+<p>以上，就完成了整个项目的迁移部署。</p>
+<h3 id="参考资料"><a href="#参考资料" class="headerlink" title="参考资料"></a>参考资料</h3><ul>
+<li><a href="https://zhuanlan.zhihu.com/p/114290069">https://zhuanlan.zhihu.com/p/114290069</a></li>
 </ul>
-<p>截止到Python3.6，基本上所有的Python序列也都实现了<code>__getitem__</code>方法，这是保证任何序列都可迭代的原因。当然标准的序列也都实现了<code>__iter__</code>方法，之所以对<code>__getitem__</code>也可以创建迭代器是为了向后兼容，未来可能不在这么做。</p>
-<p>但是，从Python3.4开始，检查x能否迭代，最准确的方法是调用iter(x)函数，如果不可迭代，再处理TypeError异常。</p>
-<p><strong>使用iter内置函数可以获取<font color=red>迭代器对象</font>。</strong>也就是说，如果一个对象实现了能返回迭代器的<code>__iter__</code>方法，那么对象就是可迭代的，序列都可以迭代；实现了<code>__getitem__</code>方法，而且其参数是从零开始的索引，这种对象也是可迭代的。</p>
-<p>因此可以明确<strong>可迭代对象</strong>和<strong>迭代器</strong>之间的关系：<strong>Python从可迭代的对象中获取迭代器。</strong></p>
-<p>标准的迭代器接口有两个方法，即：</p>
-<ul>
-<li><p><code>__next__</code>：返回下一个可用元素，如果没有元素，抛出StopIteration异常。</p>
-</li>
-<li><p><code>__iter__</code>：返回self，以便在应该使用可迭代对象的地方使用迭代器，比如for循环中。</p>
-</li>
-</ul>
-<p>因为迭代器只需<code>__next__</code>和<code>__iter__</code>两个方法，所以除了调用next()方法，以及捕获StopIteration异常之外，没有办法检查是否还有遗留的元素。此外，也没有办法还原迭代器。如果想再次迭代，那就要调用iter(…)，传入之前构建迭代器的可迭代对象。</p>
-<p>构建<code>可迭代对象</code>和<code>迭代器</code>时经常会出现错误，原因是混淆了两者。要知道，<code>可迭代的对象</code>有个<code>__iter__</code>方法，<strong>调用该方法每次都实例化一个新的迭代器</strong>；而<code>迭代器</code>要实现<code>__next__</code>方法，返回单个元素，此外还要实现<code>__iter__</code>方法，返回迭代器本身(self)，如图。因此，<code>迭代器</code>可以迭代，但是<code>可迭代的对象</code>不是<code>迭代器</code>。</p>
-<p><u><strong>需要注意的是：</strong></u></p>
-<p>可迭代的对象必须实现<code>__iter__</code>方法，但<strong>不能</strong>实现<code>__next__</code>方法。另一方面，迭代器应该一直可以迭代，迭代器的<code>__iter__</code>方法应该返回自身。虽然可迭代对象和迭代器都有<code>__iter__</code>方法，但是两者的功能不一样，再次强调一下，可迭代对象的<code>__iter__</code>用于实例化一个迭代器对象，而迭代器中的<code>__iter__</code>用于返回迭代器本身，与<code>__next__</code>共同完成迭代器的迭代作用。</p>
-<figure class="highlight python"><table><tr><td class="code"><pre><span class="line"><span class="class"><span class="keyword">class</span> <span class="title">MyFib</span>:</span></span><br><span class="line">    <span class="function"><span class="keyword">def</span> <span class="title">__init__</span>(<span class="params">self</span>):</span></span><br><span class="line">        self.pre = <span class="number">0</span></span><br><span class="line">        self.curr = <span class="number">1</span></span><br><span class="line">        self.lists = [ii <span class="keyword">for</span> ii <span class="keyword">in</span> range(<span class="number">10</span>)]</span><br><span class="line">        <span class="keyword">return</span></span><br><span class="line"></span><br><span class="line">    <span class="function"><span class="keyword">def</span> <span class="title">__getitem__</span>(<span class="params">self, item</span>):</span></span><br><span class="line">        <span class="keyword">return</span> self.lists[item]</span><br><span class="line"></span><br><span class="line"></span><br><span class="line"><span class="keyword">if</span> __name__ == <span class="string">&#x27;__main__&#x27;</span>:</span><br><span class="line">    fib = MyFib()</span><br><span class="line">    fic = iter(fib)<span class="comment">#MyFib类实现了__getitem__方法，调用内置函数iter，python会为fib创建一个迭代器对象，并返回之。因为fic是迭代器对象，才可通过for循环迭代。</span></span><br><span class="line">    <span class="comment"># for i in fib: #此行会报错</span></span><br><span class="line">    <span class="keyword">for</span> i <span class="keyword">in</span> fic:</span><br><span class="line">        print(i)</span><br></pre></td></tr></table></figure>
-
-<p>迭代器：</p>
-<figure class="highlight python"><table><tr><td class="code"><pre><span class="line"><span class="class"><span class="keyword">class</span> <span class="title">MyFib</span>:</span></span><br><span class="line">    <span class="function"><span class="keyword">def</span> <span class="title">__init__</span>(<span class="params">self</span>):</span></span><br><span class="line">        self.pre = <span class="number">0</span></span><br><span class="line">        self.curr = <span class="number">1</span></span><br><span class="line">        <span class="keyword">return</span></span><br><span class="line"></span><br><span class="line">    <span class="function"><span class="keyword">def</span> <span class="title">__iter__</span>(<span class="params">self</span>):</span></span><br><span class="line">        <span class="keyword">return</span> self</span><br><span class="line"></span><br><span class="line">    <span class="function"><span class="keyword">def</span> <span class="title">__next__</span>(<span class="params">self</span>):</span></span><br><span class="line">        self.curr, self.pre = self.curr + self.pre, self.curr</span><br><span class="line">        <span class="keyword">return</span> self.curr</span><br><span class="line"></span><br><span class="line"></span><br><span class="line"><span class="keyword">if</span> __name__ == <span class="string">&#x27;__main__&#x27;</span>:</span><br><span class="line">    fib = MyFib()</span><br><span class="line">    <span class="keyword">for</span> i <span class="keyword">in</span> range(<span class="number">10</span>):</span><br><span class="line">        print(next(fib))</span><br></pre></td></tr></table></figure>
-
-<p><strong>生成器和yield</strong></p>
-<p>生成器其实是一种特殊的迭代器，但是不需要像迭代器一样实现<code>__iter__</code>和<code>__next__</code>方法，只需要使用关键字yield就可以。</p>
-<p>我们来实现一个同样的斐波那契数列，但这次使用的是生成器：</p>
-<figure class="highlight python"><table><tr><td class="code"><pre><span class="line"><span class="function"><span class="keyword">def</span> <span class="title">fib</span>():</span></span><br><span class="line">    prev, curr = <span class="number">0</span>, <span class="number">1</span></span><br><span class="line">    <span class="keyword">while</span> <span class="literal">True</span>:</span><br><span class="line">        <span class="keyword">yield</span> curr</span><br><span class="line">        curr, prev = prev + curr, curr</span><br><span class="line"></span><br><span class="line">f = fib()</span><br><span class="line"><span class="keyword">for</span> i <span class="keyword">in</span> range(<span class="number">5</span>):</span><br><span class="line">    print(next(f))</span><br></pre></td></tr></table></figure>
-
-<p>输出打印：</p>
-<figure class="highlight python"><table><tr><td class="code"><pre><span class="line"><span class="number">1</span></span><br><span class="line"><span class="number">1</span></span><br><span class="line"><span class="number">2</span></span><br><span class="line"><span class="number">3</span></span><br><span class="line"><span class="number">5</span></span><br></pre></td></tr></table></figure>
-
-<p>上面的 fib 函数中没有 return 关键字。当运行 f = fib() 的时候，它返回的是一个生成器对象。在调用 fib() 的时候并不会运行 fib 函数中的代码，只有在调用 next() 的时候才会真正运行其中的代码。使用生成器，函数不用一次性生成所有的元素，只需在每次调用next的时候生成元素，这样更节省内存和CPU。</p>
-<p>再看一个生成器函数的例子：</p>
-<figure class="highlight python"><table><tr><td class="code"><pre><span class="line"><span class="function"><span class="keyword">def</span> <span class="title">gen_123</span>():</span>  <span class="comment"># 只要Python代码中包含yield，该函数就是生成器函数</span></span><br><span class="line">    <span class="keyword">yield</span> <span class="number">1</span>    <span class="comment">#生成器函数的定义体中通常都有循环，不过这不是必要条件；此处重复使用了3次yield</span></span><br><span class="line">    <span class="keyword">yield</span> <span class="number">2</span></span><br><span class="line">    <span class="keyword">yield</span> <span class="number">3</span></span><br><span class="line"></span><br><span class="line"><span class="keyword">if</span> __name__ == <span class="string">&#x27;__main__&#x27;</span>:</span><br><span class="line">    print(gen_123)    <span class="comment"># 可以看出gen_123是函数对象</span></span><br><span class="line">    <span class="comment"># &lt;function gen_123 at 0x10be19&gt;</span></span><br><span class="line">    print(gen_123())  <span class="comment"># 函数调用时返回的是一个生成器对象</span></span><br><span class="line">    <span class="comment"># &lt;generator object gen_123 at 0x10be31&gt;</span></span><br><span class="line"></span><br><span class="line">    <span class="keyword">for</span> i <span class="keyword">in</span> gen_123(): <span class="comment"># 生成器是迭代器，会生成传给yield关键字的表达式的值</span></span><br><span class="line">        print(i)    </span><br><span class="line">        <span class="comment"># 1</span></span><br><span class="line">        <span class="comment"># 2</span></span><br><span class="line">        <span class="comment"># 3</span></span><br><span class="line"></span><br><span class="line">    g = gen_123() <span class="comment"># 为了仔细检查，把生成器对象赋值给g</span></span><br><span class="line">    print(next(g))  <span class="comment"># 1</span></span><br><span class="line">    print(next(g))  <span class="comment"># 2</span></span><br><span class="line">    print(next(g))  <span class="comment"># 3</span></span><br><span class="line">    print(next(g))   <span class="comment"># 生成器函数的定义体执行完毕后，生成器对象会抛出异常。</span></span><br><span class="line"><span class="comment"># Traceback (most recent call last):</span></span><br><span class="line"><span class="comment">#   File &quot;test.py&quot;, line 17, in &lt;module&gt;</span></span><br><span class="line"><span class="comment">#     print(next(g))</span></span><br><span class="line"><span class="comment"># StopIteration</span></span><br></pre></td></tr></table></figure>
-
-
-
 ]]></content>
       <categories>
-        <category>流畅的Python</category>
-        <category>第二章 序列构成的数组</category>
+        <category>Python</category>
       </categories>
       <tags>
-        <tag>学习笔记</tag>
+        <tag>Python</tag>
       </tags>
   </entry>
   <entry>
@@ -990,115 +949,6 @@
       </tags>
   </entry>
   <entry>
-    <title>目标主机离线安装Python及pip3</title>
-    <url>/2020/09/24/%E7%9B%AE%E6%A0%87%E4%B8%BB%E6%9C%BA%E7%A6%BB%E7%BA%BF%E5%AE%89%E8%A3%85Python%E5%8F%8Apip3/</url>
-    <content><![CDATA[<link rel="stylesheet" class="aplayer-secondary-style-marker" href="\assets\css\APlayer.min.css"><script src="\assets\js\APlayer.min.js" class="aplayer-secondary-script-marker"></script><script class="meting-secondary-script-marker" src="\assets\js\Meting.min.js"></script><p>将Python项目文件打包到无法联网的主机上部署执行</p>
-<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201028143859.png"></p>
-<a id="more"></a>
-
-<h3 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h3><p>最近遇到了一个场景：需要将Python项目文件打包到无法联网的主机上部署执行，本篇文章记录针对于该场景的处理方案。</p>
-<p>说明：</p>
-<p>源主机（可联网）：安装了Python3和pip3</p>
-<p>目标主机（无法联网）：需安装和源主机相同的Python版本和pip3，部署执行项目文件</p>
-<p>主机系统为centos，Python版本为3.5.2，通过虚拟环境+pip进行迁移</p>
-<h3 id="目标主机离线安装Python及pip3"><a href="#目标主机离线安装Python及pip3" class="headerlink" title="目标主机离线安装Python及pip3"></a>目标主机离线安装Python及pip3</h3><h3 id="源主机中下载所需包"><a href="#源主机中下载所需包" class="headerlink" title="源主机中下载所需包"></a>源主机中下载所需包</h3><p><strong>Python3</strong></p>
-<p>首先，下载Python3，可以在<a href="https://link.zhihu.com/?target=https://www.python.org/downloads/source/">官网</a>或者通过源主机（可联网的其它主机）wget：</p>
-<figure class="highlight text"><table><tr><td class="code"><pre><span class="line">wget --no-check-certificate https://www.python.org/ftp/python/3.5.2/Python-3.5.2.tgz</span><br></pre></td></tr></table></figure>
-
-<p><strong>Python3依赖包</strong></p>
-<p>然后，需要下载Python3的依赖包，可以通过centos镜像中去copy，不过我更推荐用yum生成的方式：</p>
-<figure class="highlight text"><table><tr><td class="code"><pre><span class="line">yum install zlib-devel bzip2-devel openssl-devel ncurses-devel  epel-release gcc gcc-c++ xz-devel readline-devel gdbm-devel sqlite-devel tk-devel db4-devel libpcap-devel libffi-devel --downloadonly --downloaddir=/packages</span><br></pre></td></tr></table></figure>
-
-<p>命令执行完毕，你就会在/packages目录下发现所需的所有.rpm文件。</p>
-<p>如果，源主机中已经安装了这些依赖，那么你可以用：</p>
-<figure class="highlight text"><table><tr><td class="code"><pre><span class="line">yum reinstall zlib-devel bzip2-devel openssl-devel ncurses-devel  epel-release gcc gcc-c++ xz-devel readline-devel gdbm-devel sqlite-devel tk-devel db4-devel libpcap-devel libffi-devel --downloadonly --downloaddir=/packages</span><br></pre></td></tr></table></figure>
-
-<p>打包：</p>
-<figure class="highlight text"><table><tr><td class="code"><pre><span class="line">zip -r packages.zip packages/</span><br></pre></td></tr></table></figure>
-
-<h3 id="目标主机中安装"><a href="#目标主机中安装" class="headerlink" title="目标主机中安装"></a>目标主机中安装</h3><p>将Python-3.5.2.tgz和packages.zip上传至目标主机。</p>
-<p>首先，安装Python3依赖：</p>
-<figure class="highlight text"><table><tr><td class="code"><pre><span class="line">unzip packages.zip</span><br><span class="line">cd packages/</span><br><span class="line">rpm -Uvh  *.rpm --nodeps --force</span><br></pre></td></tr></table></figure>
-
-<p>然后，安装Python3：</p>
-<figure class="highlight text"><table><tr><td class="code"><pre><span class="line">tar -zxvf Python-3.5.2.tgz</span><br><span class="line"></span><br><span class="line">mkdir /usr/local/python3</span><br><span class="line">cd Python-3.5.2 </span><br><span class="line">./configure --prefix=/usr/local/python3                    # 将Python3安装在/usr/local/python3</span><br><span class="line">make &amp;&amp; make install                                       # 编译安装</span><br><span class="line"></span><br><span class="line">ln -s /usr/local/python3/bin/python3 /usr/bin/python3      # 创建python3软链接</span><br><span class="line">ln -s /usr/local/python3/bin/pip3 /usr/bin/pip3            # 创建pip3软链接</span><br></pre></td></tr></table></figure>
-
-<p>安装完毕，可通过：</p>
-<figure class="highlight text"><table><tr><td class="code"><pre><span class="line">Python3 -V</span><br><span class="line">pip3 -V</span><br></pre></td></tr></table></figure>
-
-<p>查看并检查安装的版本</p>
-<h3 id="源主机中打包项目文件"><a href="#源主机中打包项目文件" class="headerlink" title="源主机中打包项目文件"></a>源主机中打包项目文件</h3><p>若项目中创建虚拟环境，首先激活虚环境，然后进入项目文件，执行：</p>
-<figure class="highlight text"><table><tr><td class="code"><pre><span class="line">pip3 freeze &gt; requirements.txt</span><br></pre></td></tr></table></figure>
-
-<p>将当前项目中的库列表生成并保存在requirements.txt中。</p>
-<p>然后，通过pip生成批量离线安装包（whl文件）：</p>
-<figure class="highlight text"><table><tr><td class="code"><pre><span class="line">pip wheel --wheel-dir=./tmp/packages -r requirements.txt</span><br></pre></td></tr></table></figure>
-
-<p>执行完毕之后，你会发现/tmp/packages中包含了项目所需的所有.whl</p>
-<p>打包项目文件：</p>
-<figure class="highlight text"><table><tr><td class="code"><pre><span class="line">zip A.zip A/</span><br></pre></td></tr></table></figure>
-
-<h3 id="目标主机中部署"><a href="#目标主机中部署" class="headerlink" title="目标主机中部署"></a>目标主机中部署</h3><p>上传A.zip至目标主机，创建虚环境，并激活（python3 自带了venv）：</p>
-<figure class="highlight text"><table><tr><td class="code"><pre><span class="line">python3 -m venv test_venv</span><br><span class="line">cd test_venv</span><br><span class="line">source bin/activate</span><br></pre></td></tr></table></figure>
-
-<p>解压项目代码A.zip，并切换：</p>
-<figure class="highlight text"><table><tr><td class="code"><pre><span class="line">unzip A.zip</span><br><span class="line">cd A/</span><br></pre></td></tr></table></figure>
-
-<p>安装项目Python依赖模块：</p>
-<figure class="highlight text"><table><tr><td class="code"><pre><span class="line">pip3 install --no-index --find-links=tmp/packages -r requirements</span><br></pre></td></tr></table></figure>
-
-<p>安装完毕，检查：</p>
-<figure class="highlight text"><table><tr><td class="code"><pre><span class="line">pip3 freeze</span><br></pre></td></tr></table></figure>
-
-<p>当然你也可以通过python命令行import进行检验哈哈。</p>
-<p>最后，执行项目启动脚本（startup.sh）部署：</p>
-<figure class="highlight text"><table><tr><td class="code"><pre><span class="line">chmod +x  ./startup.sh</span><br><span class="line">nohup ./startup.sh &gt; a-log 2&gt;&amp;1 &amp;</span><br></pre></td></tr></table></figure>
-
-<p>以上，就完成了整个项目的迁移部署。</p>
-<h3 id="参考资料"><a href="#参考资料" class="headerlink" title="参考资料"></a>参考资料</h3><ul>
-<li><a href="https://zhuanlan.zhihu.com/p/114290069">https://zhuanlan.zhihu.com/p/114290069</a></li>
-</ul>
-]]></content>
-      <categories>
-        <category>Python</category>
-      </categories>
-      <tags>
-        <tag>Python</tag>
-      </tags>
-  </entry>
-  <entry>
-    <title>部署博客步骤</title>
-    <url>/2020/10/27/%E9%83%A8%E7%BD%B2%E5%8D%9A%E5%AE%A2%E6%AD%A5%E9%AA%A4/</url>
-    <content><![CDATA[<link rel="stylesheet" class="aplayer-secondary-style-marker" href="\assets\css\APlayer.min.css"><script src="\assets\js\APlayer.min.js" class="aplayer-secondary-script-marker"></script><script class="meting-secondary-script-marker" src="\assets\js\Meting.min.js"></script><p>博客部署步骤</p>
-<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201028144550.png"></p>
-<a id="more"></a>
-
-<h3 id="部署博客步骤"><a href="#部署博客步骤" class="headerlink" title="部署博客步骤"></a>部署博客步骤</h3><h4 id="1-安装PicGo"><a href="#1-安装PicGo" class="headerlink" title="1 安装PicGo"></a>1 安装PicGo</h4><p>去<code>github</code>里面下载<code>PicGo</code>，下载地址：<a href="https://github.com/Molunerfinn/PicGo/releases">https://github.com/Molunerfinn/PicGo/releases</a>。这款软件的主要作用是把本地图片上传到图床上面，比较省心省力。我目前用的图床是<code>gitee</code>。</p>
-<p>安装成功后，需要配置参数。如下步骤：</p>
-<ul>
-<li>在<strong>插件设置</strong>里搜索<code>gitee</code>关键字，选中其中一个搜索出来的结果。<img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201027162831.png"></li>
-<li>在<strong>图床设置</strong>里选中<strong>Gitee图床</strong>，设置右边的参数列表。输入用户名、仓库名、路径、私人令牌（<code>gitee</code>上获取）<img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201027163710.png"></li>
-</ul>
-<h4 id="2-下载博客源代码"><a href="#2-下载博客源代码" class="headerlink" title="2 下载博客源代码"></a>2 下载博客源代码</h4><p>克隆源码地址：<code>git clone git@github.com:wuwenlun/blog.git</code></p>
-<p><code>.gitignore</code>文件里的内容是：</p>
-<figure class="highlight text"><table><tr><td class="code"><pre><span class="line">.DS_Store</span><br><span class="line">Thumbs.db</span><br><span class="line">db.json</span><br><span class="line">*.log</span><br><span class="line">node_modules/</span><br><span class="line">public/</span><br><span class="line">.deploy*/</span><br></pre></td></tr></table></figure>
-
-
-
-<h4 id="3-部署命令"><a href="#3-部署命令" class="headerlink" title="3 部署命令"></a>3 部署命令</h4><p>可以去<code>hexo</code>官网查看相关命令，官网地址：<a href="https://hexo.bootcss.com/docs/">https://hexo.bootcss.com/docs/</a></p>
-<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201027171340.png"></p>
-]]></content>
-      <categories>
-        <category>个人博客</category>
-        <category>部署</category>
-      </categories>
-      <tags>
-        <tag>图床</tag>
-        <tag>github pages</tag>
-        <tag>个人博客</tag>
-      </tags>
-  </entry>
-  <entry>
     <title>流畅的Python学习笔记-02序列构成的数组-2-4</title>
     <url>/2020/11/03/%E6%B5%81%E7%95%85%E7%9A%84Python%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0-02%E5%BA%8F%E5%88%97%E6%9E%84%E6%88%90%E7%9A%84%E6%95%B0%E7%BB%84-2-4/</url>
     <content><![CDATA[<link rel="stylesheet" class="aplayer-secondary-style-marker" href="\assets\css\APlayer.min.css"><script src="\assets\js\APlayer.min.js" class="aplayer-secondary-script-marker"></script><script class="meting-secondary-script-marker" src="\assets\js\Meting.min.js"></script><p>第二章第四节：切片</p>
@@ -1155,6 +1005,123 @@
       </tags>
   </entry>
   <entry>
+    <title>流畅的Python学习笔记-02序列构成的数组-2-2</title>
+    <url>/2020/10/29/%E6%B5%81%E7%95%85%E7%9A%84Python%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0-02%E5%BA%8F%E5%88%97%E6%9E%84%E6%88%90%E7%9A%84%E6%95%B0%E7%BB%84-2-2/</url>
+    <content><![CDATA[<link rel="stylesheet" class="aplayer-secondary-style-marker" href="\assets\css\APlayer.min.css"><script src="\assets\js\APlayer.min.js" class="aplayer-secondary-script-marker"></script><script class="meting-secondary-script-marker" src="\assets\js\Meting.min.js"></script><p>第二章第一节：列表推导和生成器表达式</p>
+<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201028144038.png"></p>
+<a id="more"></a>
+
+<p>列表推导是构建列表（list）的快捷方式，而生成器表达式则可以用来创建其他任何类型的序列。如果你的代码里并不经常使用它们，那么很可能你错过了许多写出可读性更好且更高效的代码的机会。</p>
+<p>如果你对我说的“更具可读性”持怀疑态度的话，别急着下结论，我马上就能说服你。</p>
+<p>很多 Python 程序员都把列表推导（list comprehension）简称为 listcomps，生成式表达器（generator expression）则称为genexps。我有时也会这么用。</p>
+<h3 id="列表推导和可读性"><a href="#列表推导和可读性" class="headerlink" title="列表推导和可读性"></a>列表推导和可读性</h3><p>先来个小测试，你觉得示例 2-1 和示例 2-2 中的代码，哪个更容易读懂？</p>
+<p>示例 2-1 把一个字符串变成 Unicode 码位的列表：</p>
+<figure class="highlight python"><table><tr><td class="code"><pre><span class="line">symbols = <span class="string">&#x27;$¢£¥€¤&#x27;</span></span><br><span class="line">codes = []</span><br><span class="line"><span class="keyword">for</span> symbol <span class="keyword">in</span> symbols:</span><br><span class="line">  codes.append(ord(symbol))</span><br><span class="line">print(codes)</span><br><span class="line"></span><br><span class="line">&gt;&gt;&gt;[<span class="number">36</span>, <span class="number">162</span>, <span class="number">163</span>, <span class="number">165</span>, <span class="number">8364</span>, <span class="number">164</span>]</span><br></pre></td></tr></table></figure>
+
+<p>示例 2-2 把字符串变成 Unicode 码位的另外一种写法：</p>
+<figure class="highlight python"><table><tr><td class="code"><pre><span class="line">symbols = <span class="string">&#x27;$¢£¥€¤&#x27;</span></span><br><span class="line">codes = [ord(symbol) <span class="keyword">for</span> symbol <span class="keyword">in</span> symbols]</span><br><span class="line">print(codes)</span><br><span class="line"></span><br><span class="line">&gt;&gt;&gt;[<span class="number">36</span>, <span class="number">162</span>, <span class="number">163</span>, <span class="number">165</span>, <span class="number">8364</span>, <span class="number">164</span>]</span><br></pre></td></tr></table></figure>
+
+<p>虽说任何学过一点 Python 的人应该都能看懂示例 2-1，但是我觉得如果学会了列表推导的话，示例 2-2 读起来更方便，因为这段代码的功能从字面上就能轻松地看出来。</p>
+<p>for 循环可以胜任很多任务：遍历一个序列以求得总数或挑出某个特定的元素、用来计算总和或是平均数，还有其他任何你想做的事情。在示例 2-1 的代码里，它被用来新建一个列表。</p>
+<p>另一方面，列表推导也可能被滥用。<font color=red>通常的原则是，只用列表推导来创建新的列表，并且尽量保持简短</font>。如果列表推导的代码超过了两行，你可能就要考虑是不是得用 for 循环重写了。就跟写文章一样，并没有什么硬性的规则，这个度得你自己把握。</p>
+<p>Python 会忽略代码里 []、{} 和 () 中的换行，因此如果你的代码里有多行的列表、列表推导、生成器表达式、字典这一类的，可以省略不太好看的续行符 <code>\</code>。</p>
+<p>列表推导不会再有变量泄漏的问题。</p>
+<p>Python 2.x 中，在列表推导中 for 关键词之后的赋值操作可能会影响列表推导上下文中的同名变量。像下面这个 Python 2.7 控制台对话：</p>
+<figure class="highlight python"><table><tr><td class="code"><pre><span class="line">Python <span class="number">2.7</span><span class="number">.6</span> (default, Mar <span class="number">22</span> <span class="number">2014</span>, <span class="number">22</span>:<span class="number">59</span>:<span class="number">38</span>)</span><br><span class="line">[GCC <span class="number">4.8</span><span class="number">.2</span>] on linux2</span><br><span class="line">Type <span class="string">&quot;help&quot;</span>, <span class="string">&quot;copyright&quot;</span>, <span class="string">&quot;credits&quot;</span> <span class="keyword">or</span> <span class="string">&quot;license&quot;</span> <span class="keyword">for</span> more information.</span><br><span class="line"><span class="meta">&gt;&gt;&gt; </span>x = <span class="string">&#x27;my precious&#x27;</span></span><br><span class="line"><span class="meta">&gt;&gt;&gt; </span>dummy = [x <span class="keyword">for</span> x <span class="keyword">in</span> <span class="string">&#x27;ABC&#x27;</span>]</span><br><span class="line"><span class="meta">&gt;&gt;&gt; </span>x</span><br><span class="line"><span class="string">&#x27;C</span></span><br></pre></td></tr></table></figure>
+
+<p>如你所见，x 原本的值被取代了，但是这种情况在 Python 3 中是不会出现的。</p>
+<p>列表推导、生成器表达式，以及同它们很相似的集合（set）推导和字典（dict）推导，在 Python 3 中都有了自己的局部作用域，就像函数似的。表达式内部的变量和赋值只在局部起作用，表达式的上下文里的同名变量还可以被正常引用，局部变量并不会影响到它们。</p>
+<p>这是Python 3 代码：</p>
+<figure class="highlight python"><table><tr><td class="code"><pre><span class="line"><span class="meta">&gt;&gt;&gt; </span>x = <span class="string">&#x27;ABC&#x27;</span></span><br><span class="line"><span class="meta">&gt;&gt;&gt; </span>dummy = [ord(x) <span class="keyword">for</span> x <span class="keyword">in</span> x]</span><br><span class="line"><span class="meta">&gt;&gt;&gt; </span>x ➊</span><br><span class="line"><span class="string">&#x27;ABC&#x27;</span></span><br><span class="line"><span class="meta">&gt;&gt;&gt; </span>dummy ➋</span><br><span class="line">[<span class="number">65</span>, <span class="number">66</span>, <span class="number">67</span>]</span><br><span class="line">&gt;&gt;&gt;</span><br></pre></td></tr></table></figure>
+
+<p>➊ x 的值被保留了。</p>
+<p>➋ 列表推导也创建了正确的列表。</p>
+<p>列表推导可以帮助我们把一个序列或是其他可迭代类型中的元素过滤或是加工，然后再新建一个列表。Python 内置的 <code>filter</code> 和 <code>map</code> 函数组合起来也能达到这一效果，但是可读性上打了不小的折扣。</p>
+<h3 id="列表推导同filter和map的比较"><a href="#列表推导同filter和map的比较" class="headerlink" title="列表推导同filter和map的比较"></a>列表推导同filter和map的比较</h3><p>filter 和 map 合起来能做的事情，列表推导也可以做，而且还不需要借助难以理解和阅读的 lambda 表达式。详见示例 2-3。</p>
+<p>示例 2-3 用列表推导和 map/filter 组合来创建同样的表单：</p>
+<figure class="highlight python"><table><tr><td class="code"><pre><span class="line"><span class="meta">&gt;&gt;&gt; </span>symbols = <span class="string">&#x27;$¢£¥€¤&#x27;</span></span><br><span class="line"><span class="meta">&gt;&gt;&gt; </span>beyond_ascii = [ord(s) <span class="keyword">for</span> s <span class="keyword">in</span> symbols <span class="keyword">if</span> ord(s) &gt; <span class="number">127</span>]</span><br><span class="line"><span class="meta">&gt;&gt;&gt; </span>beyond_ascii</span><br><span class="line">[<span class="number">162</span>, <span class="number">163</span>, <span class="number">165</span>, <span class="number">8364</span>, <span class="number">164</span>]</span><br><span class="line"><span class="meta">&gt;&gt;&gt; </span>beyond_ascii = list(filter(<span class="keyword">lambda</span> c: c &gt; <span class="number">127</span>, map(ord, symbols)))</span><br><span class="line"><span class="meta">&gt;&gt;&gt; </span>beyond_ascii</span><br><span class="line">[<span class="number">162</span>, <span class="number">163</span>, <span class="number">165</span>, <span class="number">8364</span>, <span class="number">164</span>]</span><br></pre></td></tr></table></figure>
+
+<p>我原以为 map/filter 组合起来用要比列表推导快一些，Alex Martelli却说不一定——至少在上面这个例子中不一定。在本书的代码仓库（<a href="https://github.com/fluentpython/example-code">https://github.com/fluentpython/example-code</a>）中有名为02-array-seq/listcomp_speed.py（<a href="https://github.com/fluentpython/example-code/blob/master/02-array-seq/listcomp_speed.py">https://github.com/fluentpython/example-code/blob/master/02-array-seq/listcomp_speed.py</a>）的脚本，代码中有这两个方法的效率的比较。</p>
+<p>第 5 章会更详细地讨论 map 和 filter。下面就来看看如何用列表推导来计算笛卡儿积：两个或以上的列表中的元素对构成元组，这些元组构成的列表就是笛卡儿积。</p>
+<h3 id="笛卡尔积"><a href="#笛卡尔积" class="headerlink" title="笛卡尔积"></a>笛卡尔积</h3><p>如前所述，用列表推导可以生成两个或以上的可迭代类型的笛卡儿积。笛卡儿积是一个列表，列表里的元素是由输入的可迭代类型的元素对构成的元组，因此笛卡儿积列表的长度等于输入变量的长度的乘积，如下图所示：</p>
+<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201029144759.png"></p>
+<p>上图含有 4 种花色和 3 种牌面的列表的笛卡儿积，结果是一个包含 12 个元素的列表。</p>
+<p>如果你需要一个列表，列表里是 3 种不同尺寸的 T 恤衫，每个尺寸都有2 个颜色，示例 2-4 用列表推导算出了这个列表，列表里有 6 种组合。</p>
+<p>示例 2-4 使用列表推导计算笛卡儿积：</p>
+<figure class="highlight python"><table><tr><td class="code"><pre><span class="line"><span class="meta">&gt;&gt;&gt; </span>colors = [<span class="string">&#x27;black&#x27;</span>, <span class="string">&#x27;white&#x27;</span>]</span><br><span class="line"><span class="meta">&gt;&gt;&gt; </span>sizes = [<span class="string">&#x27;S&#x27;</span>, <span class="string">&#x27;M&#x27;</span>, <span class="string">&#x27;L&#x27;</span>]</span><br><span class="line"><span class="meta">&gt;&gt;&gt; </span>tshirts = [(color, size) <span class="keyword">for</span> color <span class="keyword">in</span> colors <span class="keyword">for</span> size <span class="keyword">in</span> sizes] ➊</span><br><span class="line"><span class="meta">&gt;&gt;&gt; </span>tshirts</span><br><span class="line">[(<span class="string">&#x27;black&#x27;</span>, <span class="string">&#x27;S&#x27;</span>), (<span class="string">&#x27;black&#x27;</span>, <span class="string">&#x27;M&#x27;</span>), (<span class="string">&#x27;black&#x27;</span>, <span class="string">&#x27;L&#x27;</span>), (<span class="string">&#x27;white&#x27;</span>, <span class="string">&#x27;S&#x27;</span>),</span><br><span class="line">(<span class="string">&#x27;white&#x27;</span>, <span class="string">&#x27;M&#x27;</span>), (<span class="string">&#x27;white&#x27;</span>, <span class="string">&#x27;L&#x27;</span>)]</span><br><span class="line"><span class="meta">&gt;&gt;&gt; </span><span class="keyword">for</span> color <span class="keyword">in</span> colors: ➋</span><br><span class="line"><span class="meta">... </span><span class="keyword">for</span> size <span class="keyword">in</span> sizes:</span><br><span class="line"><span class="meta">... </span>print((color, size))</span><br><span class="line">...</span><br><span class="line">(<span class="string">&#x27;black&#x27;</span>, <span class="string">&#x27;S&#x27;</span>)</span><br><span class="line">(<span class="string">&#x27;black&#x27;</span>, <span class="string">&#x27;M&#x27;</span>)</span><br><span class="line">(<span class="string">&#x27;black&#x27;</span>, <span class="string">&#x27;L&#x27;</span>)</span><br><span class="line">(<span class="string">&#x27;white&#x27;</span>, <span class="string">&#x27;S&#x27;</span>)</span><br><span class="line">(<span class="string">&#x27;white&#x27;</span>, <span class="string">&#x27;M&#x27;</span>)</span><br><span class="line">(<span class="string">&#x27;white&#x27;</span>, <span class="string">&#x27;L&#x27;</span>)</span><br><span class="line"><span class="meta">&gt;&gt;&gt; </span>tshirts = [(color, size) <span class="keyword">for</span> size <span class="keyword">in</span> sizes ➌</span><br><span class="line"><span class="meta">... </span><span class="keyword">for</span> color <span class="keyword">in</span> colors]</span><br><span class="line"><span class="meta">&gt;&gt;&gt; </span>tshirts</span><br><span class="line">[(<span class="string">&#x27;black&#x27;</span>, <span class="string">&#x27;S&#x27;</span>), (<span class="string">&#x27;white&#x27;</span>, <span class="string">&#x27;S&#x27;</span>), (<span class="string">&#x27;black&#x27;</span>, <span class="string">&#x27;M&#x27;</span>), (<span class="string">&#x27;white&#x27;</span>, <span class="string">&#x27;M&#x27;</span>),</span><br><span class="line">(<span class="string">&#x27;black&#x27;</span>, <span class="string">&#x27;L&#x27;</span>), (<span class="string">&#x27;white&#x27;</span>, <span class="string">&#x27;L&#x27;</span>)]</span><br></pre></td></tr></table></figure>
+
+<p>➊ 这里得到的结果是先以颜色排列，再以尺码排列。</p>
+<p>➋ 注意，这里两个循环的嵌套关系和上面列表推导中 for 从句的先后顺序一样。</p>
+<p>➌ 如果想依照先尺码后颜色的顺序来排列，只需要调整从句的顺序。我在这里插入了一个换行符，这样顺序安排就更明显了。</p>
+<p><font color=red><strong>列表推导的作用只有一个：生成列表（list）。如果想生成其他类型的序列，生成器表达式就派上了用场。下一节就是对生成器表达式的一个简单介绍，其中可以看到如何用它生成列表以外的序列类型。</strong></font></p>
+<h3 id="生成器表达式"><a href="#生成器表达式" class="headerlink" title="生成器表达式"></a>生成器表达式</h3><p>虽然也可以用列表推导来初始化元组、数组或其他序列类型，但是生成器表达式是更好的选择。<strong>这是因为生成器表达式背后遵守了迭代器协议，可以逐个地产出元素，而不是先建立一个完整的列表，然后再把这个列表传递到某个构造函数里</strong>。前面那种方式显然能够节省内存。</p>
+<p>生成器表达式的语法跟列表推导差不多，只不过把方括号换成圆括号而已。</p>
+<p>示例 2-5 用生成器表达式初始化元组和数组：</p>
+<figure class="highlight python"><table><tr><td class="code"><pre><span class="line"><span class="meta">&gt;&gt;&gt; </span>symbols = <span class="string">&#x27;$¢£¥€¤&#x27;</span></span><br><span class="line"><span class="meta">&gt;&gt;&gt; </span>tuple(ord(symbol) <span class="keyword">for</span> symbol <span class="keyword">in</span> symbols) ➊</span><br><span class="line">(<span class="number">36</span>, <span class="number">162</span>, <span class="number">163</span>, <span class="number">165</span>, <span class="number">8364</span>, <span class="number">164</span>)</span><br><span class="line"><span class="meta">&gt;&gt;&gt; </span><span class="keyword">import</span> array</span><br><span class="line"><span class="meta">&gt;&gt;&gt; </span>array.array(<span class="string">&#x27;I&#x27;</span>, (ord(symbol) <span class="keyword">for</span> symbol <span class="keyword">in</span> symbols)) ➋</span><br><span class="line">array(<span class="string">&#x27;I&#x27;</span>, [<span class="number">36</span>, <span class="number">162</span>, <span class="number">163</span>, <span class="number">165</span>, <span class="number">8364</span>, <span class="number">164</span>])</span><br></pre></td></tr></table></figure>
+
+<p>➊ 如果生成器表达式是一个函数调用过程中的唯一参数，那么不需要额外再用括号把它围起来。</p>
+<p>➋ array 的构造方法需要两个参数，因此括号是必需的。array 构造方法的第一个参数指定了数组中数字的存储方式。2.9.1 节中有更多关于数组的详细讨论。</p>
+<p>示例 2-6 则是利用生成器表达式实现了一个笛卡儿积，用以打印出上文中我们提到过的 T 恤衫的 2 种颜色和 3 种尺码的所有组合。与示例 2-4不同的是，用到生成器表达式之后，内存里不会留下一个有 6 个组合的列表，因为生成器表达式会在每次 for 循环运行时才生成一个组合。如果要计算两个各有 1000 个元素的列表的笛卡儿积，生成器表达式就可以帮忙省掉运行 for 循环的开销，即一个含有 100 万个元素的列表。</p>
+<p>示例 2-6 使用生成器表达式计算笛卡儿积：</p>
+<figure class="highlight python"><table><tr><td class="code"><pre><span class="line"><span class="meta">&gt;&gt;&gt; </span>colors = [<span class="string">&#x27;black&#x27;</span>, <span class="string">&#x27;white&#x27;</span>]</span><br><span class="line"><span class="meta">&gt;&gt;&gt; </span>sizes = [<span class="string">&#x27;S&#x27;</span>, <span class="string">&#x27;M&#x27;</span>, <span class="string">&#x27;L&#x27;</span>]</span><br><span class="line"><span class="meta">&gt;&gt;&gt; </span><span class="keyword">for</span> tshirt <span class="keyword">in</span> (<span class="string">&#x27;%s %s&#x27;</span> % (c, s) <span class="keyword">for</span> c <span class="keyword">in</span> colors <span class="keyword">for</span> s <span class="keyword">in</span> sizes): ➊</span><br><span class="line"><span class="meta">... </span>print(tshirt)</span><br><span class="line">...</span><br><span class="line">black S</span><br><span class="line">black M</span><br><span class="line">black L</span><br><span class="line">white S</span><br><span class="line">white M</span><br><span class="line">white L</span><br></pre></td></tr></table></figure>
+
+<p>➊ 生成器表达式逐个产出元素，从来不会一次性产出一个含有 6 个 T恤样式的列表。</p>
+<p>第 14 章会专门讲到生成器的工作原理。这里只是简单看看如何用生成器来初始化除列表之外的序列，以及如何用它来避免额外的内存占用。</p>
+<h3 id="如何理解可迭代对象、迭代器和生成器"><a href="#如何理解可迭代对象、迭代器和生成器" class="headerlink" title="如何理解可迭代对象、迭代器和生成器"></a>如何理解可迭代对象、迭代器和生成器</h3><p>在讨论可迭代对象、迭代器和生成器之前，先说明一下<strong>迭代器模式（iterator pattern）</strong>，维基百科这么解释：</p>
+<blockquote>
+<p>迭代器是一种最简单也最常见的设计模式。它可以让用户透过特定的接口巡访容器中的每一个元素而不用了解底层的实现。</p>
+</blockquote>
+<p>迭代是数据处理的基石。当内存中放不下数据集时，我们要找到一种<strong>惰性</strong>获取数据的方式，即按需一次获取一个数据项，这就是迭代器模式。</p>
+<p>我们都知道序列是可迭代的。当解释器需要迭代对象x时，会自动调用iter(x)函数时。内置的iter函数有以下作用：</p>
+<ul>
+<li>检查对象是否实现了<code>__iter__</code>方法，如果实现了就调用它，获得一个迭代器。</li>
+<li>如果没有实现<code>__iter__</code>方法，但是实现了<code>__getitem__</code>方法，python会创建一个迭代器，尝试按顺序（从索引0开始）获取元素。</li>
+<li>如果尝试失败，python会抛出<code>TypeError</code>异常，通常会提示”C object is not iterable”，其中C是目标对象所属的类。</li>
+</ul>
+<p>截止到Python3.6，基本上所有的Python序列也都实现了<code>__getitem__</code>方法，这是保证任何序列都可迭代的原因。当然标准的序列也都实现了<code>__iter__</code>方法，之所以对<code>__getitem__</code>也可以创建迭代器是为了向后兼容，未来可能不在这么做。</p>
+<p>但是，从Python3.4开始，检查x能否迭代，最准确的方法是调用iter(x)函数，如果不可迭代，再处理TypeError异常。</p>
+<p><strong>使用iter内置函数可以获取<font color=red>迭代器对象</font>。</strong>也就是说，如果一个对象实现了能返回迭代器的<code>__iter__</code>方法，那么对象就是可迭代的，序列都可以迭代；实现了<code>__getitem__</code>方法，而且其参数是从零开始的索引，这种对象也是可迭代的。</p>
+<p>因此可以明确<strong>可迭代对象</strong>和<strong>迭代器</strong>之间的关系：<strong>Python从可迭代的对象中获取迭代器。</strong></p>
+<p>标准的迭代器接口有两个方法，即：</p>
+<ul>
+<li><p><code>__next__</code>：返回下一个可用元素，如果没有元素，抛出StopIteration异常。</p>
+</li>
+<li><p><code>__iter__</code>：返回self，以便在应该使用可迭代对象的地方使用迭代器，比如for循环中。</p>
+</li>
+</ul>
+<p>因为迭代器只需<code>__next__</code>和<code>__iter__</code>两个方法，所以除了调用next()方法，以及捕获StopIteration异常之外，没有办法检查是否还有遗留的元素。此外，也没有办法还原迭代器。如果想再次迭代，那就要调用iter(…)，传入之前构建迭代器的可迭代对象。</p>
+<p>构建<code>可迭代对象</code>和<code>迭代器</code>时经常会出现错误，原因是混淆了两者。要知道，<code>可迭代的对象</code>有个<code>__iter__</code>方法，<strong>调用该方法每次都实例化一个新的迭代器</strong>；而<code>迭代器</code>要实现<code>__next__</code>方法，返回单个元素，此外还要实现<code>__iter__</code>方法，返回迭代器本身(self)，如图。因此，<code>迭代器</code>可以迭代，但是<code>可迭代的对象</code>不是<code>迭代器</code>。</p>
+<p><u><strong>需要注意的是：</strong></u></p>
+<p>可迭代的对象必须实现<code>__iter__</code>方法，但<strong>不能</strong>实现<code>__next__</code>方法。另一方面，迭代器应该一直可以迭代，迭代器的<code>__iter__</code>方法应该返回自身。虽然可迭代对象和迭代器都有<code>__iter__</code>方法，但是两者的功能不一样，再次强调一下，可迭代对象的<code>__iter__</code>用于实例化一个迭代器对象，而迭代器中的<code>__iter__</code>用于返回迭代器本身，与<code>__next__</code>共同完成迭代器的迭代作用。</p>
+<figure class="highlight python"><table><tr><td class="code"><pre><span class="line"><span class="class"><span class="keyword">class</span> <span class="title">MyFib</span>:</span></span><br><span class="line">    <span class="function"><span class="keyword">def</span> <span class="title">__init__</span>(<span class="params">self</span>):</span></span><br><span class="line">        self.pre = <span class="number">0</span></span><br><span class="line">        self.curr = <span class="number">1</span></span><br><span class="line">        self.lists = [ii <span class="keyword">for</span> ii <span class="keyword">in</span> range(<span class="number">10</span>)]</span><br><span class="line">        <span class="keyword">return</span></span><br><span class="line"></span><br><span class="line">    <span class="function"><span class="keyword">def</span> <span class="title">__getitem__</span>(<span class="params">self, item</span>):</span></span><br><span class="line">        <span class="keyword">return</span> self.lists[item]</span><br><span class="line"></span><br><span class="line"></span><br><span class="line"><span class="keyword">if</span> __name__ == <span class="string">&#x27;__main__&#x27;</span>:</span><br><span class="line">    fib = MyFib()</span><br><span class="line">    fic = iter(fib)<span class="comment">#MyFib类实现了__getitem__方法，调用内置函数iter，python会为fib创建一个迭代器对象，并返回之。因为fic是迭代器对象，才可通过for循环迭代。</span></span><br><span class="line">    <span class="comment"># for i in fib: #此行会报错</span></span><br><span class="line">    <span class="keyword">for</span> i <span class="keyword">in</span> fic:</span><br><span class="line">        print(i)</span><br></pre></td></tr></table></figure>
+
+<p>迭代器：</p>
+<figure class="highlight python"><table><tr><td class="code"><pre><span class="line"><span class="class"><span class="keyword">class</span> <span class="title">MyFib</span>:</span></span><br><span class="line">    <span class="function"><span class="keyword">def</span> <span class="title">__init__</span>(<span class="params">self</span>):</span></span><br><span class="line">        self.pre = <span class="number">0</span></span><br><span class="line">        self.curr = <span class="number">1</span></span><br><span class="line">        <span class="keyword">return</span></span><br><span class="line"></span><br><span class="line">    <span class="function"><span class="keyword">def</span> <span class="title">__iter__</span>(<span class="params">self</span>):</span></span><br><span class="line">        <span class="keyword">return</span> self</span><br><span class="line"></span><br><span class="line">    <span class="function"><span class="keyword">def</span> <span class="title">__next__</span>(<span class="params">self</span>):</span></span><br><span class="line">        self.curr, self.pre = self.curr + self.pre, self.curr</span><br><span class="line">        <span class="keyword">return</span> self.curr</span><br><span class="line"></span><br><span class="line"></span><br><span class="line"><span class="keyword">if</span> __name__ == <span class="string">&#x27;__main__&#x27;</span>:</span><br><span class="line">    fib = MyFib()</span><br><span class="line">    <span class="keyword">for</span> i <span class="keyword">in</span> range(<span class="number">10</span>):</span><br><span class="line">        print(next(fib))</span><br></pre></td></tr></table></figure>
+
+<p><strong>生成器和yield</strong></p>
+<p>生成器其实是一种特殊的迭代器，但是不需要像迭代器一样实现<code>__iter__</code>和<code>__next__</code>方法，只需要使用关键字yield就可以。</p>
+<p>我们来实现一个同样的斐波那契数列，但这次使用的是生成器：</p>
+<figure class="highlight python"><table><tr><td class="code"><pre><span class="line"><span class="function"><span class="keyword">def</span> <span class="title">fib</span>():</span></span><br><span class="line">    prev, curr = <span class="number">0</span>, <span class="number">1</span></span><br><span class="line">    <span class="keyword">while</span> <span class="literal">True</span>:</span><br><span class="line">        <span class="keyword">yield</span> curr</span><br><span class="line">        curr, prev = prev + curr, curr</span><br><span class="line"></span><br><span class="line">f = fib()</span><br><span class="line"><span class="keyword">for</span> i <span class="keyword">in</span> range(<span class="number">5</span>):</span><br><span class="line">    print(next(f))</span><br></pre></td></tr></table></figure>
+
+<p>输出打印：</p>
+<figure class="highlight python"><table><tr><td class="code"><pre><span class="line"><span class="number">1</span></span><br><span class="line"><span class="number">1</span></span><br><span class="line"><span class="number">2</span></span><br><span class="line"><span class="number">3</span></span><br><span class="line"><span class="number">5</span></span><br></pre></td></tr></table></figure>
+
+<p>上面的 fib 函数中没有 return 关键字。当运行 f = fib() 的时候，它返回的是一个生成器对象。在调用 fib() 的时候并不会运行 fib 函数中的代码，只有在调用 next() 的时候才会真正运行其中的代码。使用生成器，函数不用一次性生成所有的元素，只需在每次调用next的时候生成元素，这样更节省内存和CPU。</p>
+<p>再看一个生成器函数的例子：</p>
+<figure class="highlight python"><table><tr><td class="code"><pre><span class="line"><span class="function"><span class="keyword">def</span> <span class="title">gen_123</span>():</span>  <span class="comment"># 只要Python代码中包含yield，该函数就是生成器函数</span></span><br><span class="line">    <span class="keyword">yield</span> <span class="number">1</span>    <span class="comment">#生成器函数的定义体中通常都有循环，不过这不是必要条件；此处重复使用了3次yield</span></span><br><span class="line">    <span class="keyword">yield</span> <span class="number">2</span></span><br><span class="line">    <span class="keyword">yield</span> <span class="number">3</span></span><br><span class="line"></span><br><span class="line"><span class="keyword">if</span> __name__ == <span class="string">&#x27;__main__&#x27;</span>:</span><br><span class="line">    print(gen_123)    <span class="comment"># 可以看出gen_123是函数对象</span></span><br><span class="line">    <span class="comment"># &lt;function gen_123 at 0x10be19&gt;</span></span><br><span class="line">    print(gen_123())  <span class="comment"># 函数调用时返回的是一个生成器对象</span></span><br><span class="line">    <span class="comment"># &lt;generator object gen_123 at 0x10be31&gt;</span></span><br><span class="line"></span><br><span class="line">    <span class="keyword">for</span> i <span class="keyword">in</span> gen_123(): <span class="comment"># 生成器是迭代器，会生成传给yield关键字的表达式的值</span></span><br><span class="line">        print(i)    </span><br><span class="line">        <span class="comment"># 1</span></span><br><span class="line">        <span class="comment"># 2</span></span><br><span class="line">        <span class="comment"># 3</span></span><br><span class="line"></span><br><span class="line">    g = gen_123() <span class="comment"># 为了仔细检查，把生成器对象赋值给g</span></span><br><span class="line">    print(next(g))  <span class="comment"># 1</span></span><br><span class="line">    print(next(g))  <span class="comment"># 2</span></span><br><span class="line">    print(next(g))  <span class="comment"># 3</span></span><br><span class="line">    print(next(g))   <span class="comment"># 生成器函数的定义体执行完毕后，生成器对象会抛出异常。</span></span><br><span class="line"><span class="comment"># Traceback (most recent call last):</span></span><br><span class="line"><span class="comment">#   File &quot;test.py&quot;, line 17, in &lt;module&gt;</span></span><br><span class="line"><span class="comment">#     print(next(g))</span></span><br><span class="line"><span class="comment"># StopIteration</span></span><br></pre></td></tr></table></figure>
+
+
+
+]]></content>
+      <categories>
+        <category>流畅的Python</category>
+        <category>第二章 序列构成的数组</category>
+      </categories>
+      <tags>
+        <tag>学习笔记</tag>
+      </tags>
+  </entry>
+  <entry>
     <title>计算机存储术语扇区-磁盘块-页</title>
     <url>/2020/09/24/%E8%AE%A1%E7%AE%97%E6%9C%BA%E5%AD%98%E5%82%A8%E6%9C%AF%E8%AF%AD%E6%89%87%E5%8C%BA-%E7%A3%81%E7%9B%98%E5%9D%97-%E9%A1%B5/</url>
     <content><![CDATA[<link rel="stylesheet" class="aplayer-secondary-style-marker" href="\assets\css\APlayer.min.css"><script src="\assets\js\APlayer.min.js" class="aplayer-secondary-script-marker"></script><script class="meting-secondary-script-marker" src="\assets\js\Meting.min.js"></script><p>计算机存储术语: 扇区，磁盘块，页</p>
@@ -1189,6 +1156,38 @@
 ]]></content>
       <tags>
         <tag>MySQL</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title>部署博客步骤</title>
+    <url>/2020/10/27/%E9%83%A8%E7%BD%B2%E5%8D%9A%E5%AE%A2%E6%AD%A5%E9%AA%A4/</url>
+    <content><![CDATA[<link rel="stylesheet" class="aplayer-secondary-style-marker" href="\assets\css\APlayer.min.css"><script src="\assets\js\APlayer.min.js" class="aplayer-secondary-script-marker"></script><script class="meting-secondary-script-marker" src="\assets\js\Meting.min.js"></script><p>博客部署步骤</p>
+<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201028144550.png"></p>
+<a id="more"></a>
+
+<h3 id="部署博客步骤"><a href="#部署博客步骤" class="headerlink" title="部署博客步骤"></a>部署博客步骤</h3><h4 id="1-安装PicGo"><a href="#1-安装PicGo" class="headerlink" title="1 安装PicGo"></a>1 安装PicGo</h4><p>去<code>github</code>里面下载<code>PicGo</code>，下载地址：<a href="https://github.com/Molunerfinn/PicGo/releases">https://github.com/Molunerfinn/PicGo/releases</a>。这款软件的主要作用是把本地图片上传到图床上面，比较省心省力。我目前用的图床是<code>gitee</code>。</p>
+<p>安装成功后，需要配置参数。如下步骤：</p>
+<ul>
+<li>在<strong>插件设置</strong>里搜索<code>gitee</code>关键字，选中其中一个搜索出来的结果。<img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201027162831.png"></li>
+<li>在<strong>图床设置</strong>里选中<strong>Gitee图床</strong>，设置右边的参数列表。输入用户名、仓库名、路径、私人令牌（<code>gitee</code>上获取）<img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201027163710.png"></li>
+</ul>
+<h4 id="2-下载博客源代码"><a href="#2-下载博客源代码" class="headerlink" title="2 下载博客源代码"></a>2 下载博客源代码</h4><p>克隆源码地址：<code>git clone git@github.com:wuwenlun/blog.git</code></p>
+<p><code>.gitignore</code>文件里的内容是：</p>
+<figure class="highlight text"><table><tr><td class="code"><pre><span class="line">.DS_Store</span><br><span class="line">Thumbs.db</span><br><span class="line">db.json</span><br><span class="line">*.log</span><br><span class="line">node_modules/</span><br><span class="line">public/</span><br><span class="line">.deploy*/</span><br></pre></td></tr></table></figure>
+
+
+
+<h4 id="3-部署命令"><a href="#3-部署命令" class="headerlink" title="3 部署命令"></a>3 部署命令</h4><p>可以去<code>hexo</code>官网查看相关命令，官网地址：<a href="https://hexo.bootcss.com/docs/">https://hexo.bootcss.com/docs/</a></p>
+<p><img src="https://gitee.com/wuwenlun/img-bed/raw/master/img/20201027171340.png"></p>
+]]></content>
+      <categories>
+        <category>个人博客</category>
+        <category>部署</category>
+      </categories>
+      <tags>
+        <tag>图床</tag>
+        <tag>github pages</tag>
+        <tag>个人博客</tag>
       </tags>
   </entry>
 </search>
